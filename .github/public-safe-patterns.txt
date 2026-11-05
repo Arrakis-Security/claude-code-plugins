@@ -1,0 +1,13 @@
+# Text that must not reach a public repository. One extended regular expression per line; matching is case-sensitive.
+
+# Links to private workspaces
+atlassian\.net
+slack\.com/(archives|team|client)
+notion\.(so|site)/
+linear\.app/
+docs\.google\.com/
+drive\.google\.com/
+loom\.com/share/
+
+# Private hostnames
+[A-Za-z0-9-]+\.internal([^A-Za-z0-9]|$)

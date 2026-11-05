@@ -1,0 +1,39 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install -g @anthropic-ai/claude-code
+      - name: Validate the marketplace
+        run: claude plugin validate .
+      - name: Validate and test each plugin
+        run: |
+          for plugin in plugins/*/; do
+            claude plugin validate "$plugin"
+            claude plugin test "$plugin"
+          done
+      - name: Check every commit is signed off (DCO)
+        if: github.event_name == 'pull_request'
+        run: |
+          missing=$(git log --format='%H %(trailers:key=Signed-off-by,valueonly,separator=%x2C)' \
+            "${{ github.event.pull_request.base.sha }}..${{ github.event.pull_request.head.sha }}" | awk 'NF == 1 { print $1 }')
+          if [ -n "$missing" ]; then
+            echo "These commits have no Signed-off-by line. Add one with git commit -s:"
+            echo "$missing"
+            exit 1
+          fi
