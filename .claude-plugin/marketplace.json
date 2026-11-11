@@ -1,0 +1,12 @@
+{
+  "name": "arrakis-security",
+  "owner": { "name": "Arrakis", "url": "https://github.com/Arrakis-Security" },
+  "description": "Claude Code plugins from Arrakis",
+  "plugins": [
+    {
+      "name": "arrakis-secret-redactor",
+      "source": "./plugins/arrakis-secret-redactor",
+      "description": "Hides secrets from Claude: replaces them in tool results with placeholders, and writes real values back only into git-ignored files"
+    }
+  ]
+}
