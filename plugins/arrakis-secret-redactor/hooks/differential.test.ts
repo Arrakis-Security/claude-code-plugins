@@ -54,6 +54,11 @@ function cases(): Case[] {
           URL_CONTEXTS.forEach((wrap, c) =>
             out.push({ label: `url user=${user} password#${URL_PASSWORDS.indexOf(password)} scheme=${scheme} host=${host} context#${c}`, text: wrap(`${scheme}://${user}:${password}@${host}`) }),
           )
+  // A credential with no scheme after a URL in a JSON line, where the URL rule's user part runs across the fields.
+  for (const user of URL_USERS)
+    URL_PASSWORDS.forEach((password, p) =>
+      HOSTS.forEach(host => out.push({ label: `json field user=${user} password#${p} host=${host}`, text: `{"home":"https://example.com","dsn":"${user}:${password}@${host}"}` })),
+    )
   for (const name of NAMES)
     NAMED_VALUES.forEach((value, v) =>
       NAMED_SHAPES.forEach((shape, s) => out.push({ label: `named name=${name} value#${v} shape#${s}`, text: shape(name, value) })),
@@ -71,6 +76,8 @@ function byShape(missed: string[]): Record<string, number> {
   }
   return counts
 }
+
+const looksRandom = (value: string): boolean => value.length >= 8 && /[A-Za-z]/.test(value) && /[0-9]/.test(value)
 
 const covered =(spans: { start: number; end: number }[], start: number, end: number): boolean => {
   for (let at = start; at < end; at++) if (!spans.some(s => s.start <= at && at < s.end)) return false
@@ -103,6 +110,8 @@ test('hides again in later results every value 1.0.0 hid again, except a short p
       if (before.mask(later).text.includes(value) || !now.mask(later).text.includes(value)) continue
       const wider = spans.find(s => s.start <= old.start && s.end >= old.end && s.end - s.start > value.length)
       if (wider !== undefined && (value.length < 6 || /^\d+$/.test(value))) continue
+      // After a URL in a JSON line, the value 1.0.0 hid starts at the next field's quote, and the vault replays it only when it looks random.
+      if (label.startsWith('json field') && !looksRandom(value)) continue
       missed.push(`${label} [${old.start},${old.end})`)
     }
   }

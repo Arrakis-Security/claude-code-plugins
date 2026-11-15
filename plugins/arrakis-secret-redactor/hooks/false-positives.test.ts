@@ -6,6 +6,8 @@ import { Vault } from './vault'
 // Built at run time, so no secret-shaped literal sits in the file.
 const WORD_PASSWORD = ['hun', 'ter2', 'Pass9'].join('')
 const RANDOM = ['Zx9qL', 'm2Vt8', 'RkW4p', 'Yb7Nc', 'J3sHd', 'Q6uFa'].join('')
+// Built at run time, so the file holds no workspace link for the public-safe check to flag.
+const ATLASSIAN = ['example', 'atlassian', 'net'].join('.')
 
 test('leaves types, literals and pointers to a secret alone', () => {
   const safe = [
@@ -31,6 +33,53 @@ test('leaves tool call ids and log or trace ids alone', () => {
     'event_id: AwAAAZnjK8qT1Jx2bQAAABhBWm5qSzhxVEFBQ1pRMXJIcWJZQUFBQUEAAAAkMDE5OWUz',
   ]
   for (const text of safe) expect(secretSpans(text)).toEqual([])
+})
+
+test('leaves claude.ai artifact links and Jira atlOrigin tags alone', () => {
+  const id = RANDOM.slice(0, 22)
+  const safe = [
+    `https://claude.ai/artifact/${id}`,
+    `https://claude.ai/code/artifact/${id} (Dev demo)`,
+    'https://claude.ai/code/artifact/0b6e4f0a-3c1d-4e2b-9f7a-5d8c2e1b4a90',
+    `https://${ATLASSIAN}/browse/PROJ-1?atlOrigin=eyJ${RANDOM}`,
+  ]
+  for (const text of safe) expect({ text, spans: secretSpans(text) }).toEqual({ text, spans: [] })
+})
+
+test('still hides a random token in a link from another host or joined to an id', () => {
+  const id = RANDOM.slice(0, 22)
+  const hidden = [
+    `https://example.com/artifact/${RANDOM}`,
+    `https://evil-claude.ai/artifact/${id}`,
+    `https://evil.com/claude.ai/artifact/${id}`,
+    `https://claude.ai/artifact/${id}_${RANDOM}`,
+    `https://evil.com/x?atlOrigin=eyJ${RANDOM}`,
+    `see &atlOrigin=eyJ${RANDOM} here`,
+    `https://x.${ATLASSIAN}/wiki?atlOrigin=eyJabc/${RANDOM}`,
+  ]
+  for (const text of hidden) expect({ text, found: secretSpans(text).length > 0 }).toEqual({ text, found: true })
+})
+
+test('hides the start of a JSON value after a URL only in that line, not in every later result', () => {
+  const lines = [
+    '{"url":"https://example.com","contact":"me@example.com"}',
+    "{'url':'https://example.com','contact':'me@example.com'}",
+    '[{"url":"https://example.com"},{"contact":"me@example.com"}]',
+  ]
+  for (const line of lines) {
+    const vault = new Vault()
+    expect({ line, count: vault.mask(line).count }).toEqual({ line, count: 1 })
+    for (const later of ['{"message":"Not Found","members":2}', "{'message':'Not Found'}"]) {
+      expect({ line, later: vault.mask(later).text }).toEqual({ line, later })
+    }
+  }
+})
+
+test('still hides a random-looking value after a URL in later results', () => {
+  const password = ['Hunter', '2two'].join('')
+  const vault = new Vault()
+  vault.mask(`{"url":"https://example.com","dsn":"admin:${password}@db"}`)
+  expect(vault.mask(`{"dsn":"admin:${password}@db"}`).text).not.toContain(password)
 })
 
 test('still hides a random token that is not under an id key', () => {
