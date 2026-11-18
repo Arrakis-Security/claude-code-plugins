@@ -37,16 +37,30 @@ const NOT_A_SECRET_VALUE = new RegExp(String.raw`^(?:(?:${TYPE_WORDS})\b|\$\{?[A
 const NOT_A_QUOTED_SECRET = new RegExp(String.raw`^(?:(?:${TYPE_WORDS})$|\$(?:\{[A-Za-z_][A-Za-z0-9_]*\}|(?:env:)?[A-Za-z_][A-Za-z0-9_]*)$|${POINTERS})`, 'i')
 
 // Random by design and not a credential: a tool call's id, a log or trace id under its own key, a claude.ai artifact id, and the `atlOrigin` tag Atlassian adds to its links.
-// The two link ids match only on their own host and in their own shape, with nothing joined after them.
+// The two link ids match only in a link with no earlier "//" in the same run of URL characters, so not one inside another URL's path or query, on their own host and in their own shape, with nothing joined after them.
 const RANDOM_ID =
-  /\b(?:srv)?toolu_[A-Za-z0-9]{20,}|\b(?:event_id|trace_id|span_id|tool_use_id|request_id)["']?\s*[:=]\s*["']?[A-Za-z0-9_+/=-]+|(?<=https:\/\/claude\.ai\/(?:code\/)?artifact\/)(?:[A-Za-z0-9]{22}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(?![A-Za-z0-9_+/=-])|(?<=https:\/\/[a-z0-9-]+\.atlassian\.net\/[^\s?#"'<>]*\?(?:[^\s#"'<>&]*&)*atlOrigin=)eyJ[A-Za-z0-9_-]{8,512}(?![A-Za-z0-9_+/=-])/g
+  /\b(?:srv)?toolu_[A-Za-z0-9]{20,}|\b(?:event_id|trace_id|span_id|tool_use_id|request_id)["']?\s*[:=]\s*["']?[A-Za-z0-9_+/=-]+|(?<=(?<!\/\/[^\s"'`<>]*?)https:\/\/claude\.ai\/(?:code\/)?artifact\/)(?:[A-Za-z0-9]{22}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(?![A-Za-z0-9_+/=-])|(?<=(?<!\/\/[^\s"'`<>]*?)https:\/\/[a-z0-9-]+\.atlassian\.net\/[^\s?#"'<>]*\?(?:[^\s#"'<>&]*&)*atlOrigin=)eyJ[A-Za-z0-9_-]{8,512}(?![A-Za-z0-9_+/=-])/g
 
 // The password in `postgres://user:PASSWORD@host`.
 // The user name rule of 1.0.0, so every URL password 1.0.0 hid stays hidden, quotes in the user name included.
 const URL_USER_NAME = String.raw`[^\s:/@]+`
 const URL_PASSWORD = new RegExp(String.raw`(:\/\/${URL_USER_NAME}:)([^\s@/]{${MIN_URL_PASSWORD},})(@)`, 'gi')
-// A quote followed by `,` `}` or `]` in the user part means the match ran across fields of a JSON line or a dict.
 const CROSSES_FIELDS = /["'`]\s*[,}\]]/
+const ENDS_FIELD: Record<string, RegExp> = { '"': /"\s*[,}\]]/, "'": /'\s*[,}\]]/, '`': /`\s*[,}\]]/ }
+
+// A user part ran across fields of a JSON line or a dict only when it closes the string value the URL sits in.
+// A user name may hold `'` and `,`, so outside such a value the password keeps its usual replay.
+function crossesFields(text: string, at: number, lead: string): boolean {
+  if (!CROSSES_FIELDS.test(lead)) return false
+  let open = at - 1
+  while (open >= 0 && !`"'\`\n`.includes(text[open]!)) open--
+  if (open < 0 || text[open] === '\n' || !ENDS_FIELD[text[open]!]!.test(lead)) return false
+  // A quote opens a value after `:` `[` `,` `{` or the line start, also as `\"` in escaped JSON.
+  let before = open - 1
+  if (text[before] === '\\') before--
+  while (before >= 0 && (text[before] === ' ' || text[before] === '\t')) before--
+  return before < 0 || ':[,{\n'.includes(text[before]!)
+}
 
 const BEARER = /(\bBearer\s+)([A-Za-z0-9._~+/=-]{20,})/g
 
@@ -119,10 +133,10 @@ function highEntropySpans(text: string): Span[] {
 
 const isPlainWord = (value: string): boolean => /^[A-Za-z]+$/.test(value)
 
-function groupSpans(text: string, pattern: RegExp, isNamed: (value: string, lead: string) => boolean = () => false): Span[] {
+function groupSpans(text: string, pattern: RegExp, isNamed: (value: string, lead: string, at: number) => boolean = () => false): Span[] {
   return [...text.matchAll(pattern)].map(m => {
     const start = m.index! + m[1]!.length
-    return { start, end: start + m[2]!.length, named: isNamed(m[2]!, m[1]!) }
+    return { start, end: start + m[2]!.length, named: isNamed(m[2]!, m[1]!, m.index!) }
   })
 }
 
@@ -197,7 +211,7 @@ function urlAuthoritySpans(text: string): Span[] {
       HOST_AFTER_AT.lastIndex = at + 1
       if (at - start >= MIN_URL_PASSWORD && HOST_AFTER_AT.test(text)) end = at
     }
-    if (end !== -1) spans.push({ start, end, named: isPlainWord(text.slice(start, end)) || CROSSES_FIELDS.test(m[0]) })
+    if (end !== -1) spans.push({ start, end, named: isPlainWord(text.slice(start, end)) || crossesFields(text, m.index!, m[0]) })
   }
   return spans
 }
@@ -207,7 +221,7 @@ export function secretSpans(text: string): Span[] {
     ...VENDOR_SHAPES.flatMap(p => wholeSpans(text, p)),
     ...groupSpans(text, NAMED_VALUE, () => true).filter(s => !NOT_A_SECRET_VALUE.test(text.slice(s.start, s.end)) && !isRegexLiteral(text, s.start)),
     // A letters-only URL password is a word like "postgres", and one after fields of a JSON line is the start of the next value: both stay hidden only where the rule finds them.
-    ...groupSpans(text, URL_PASSWORD, (value, lead) => isPlainWord(value) || CROSSES_FIELDS.test(lead)),
+    ...groupSpans(text, URL_PASSWORD, (value, lead, at) => isPlainWord(value) || crossesFields(text, at, lead)),
     ...groupSpans(text, BEARER),
     ...withoutRandomIds(text, highEntropySpans(text)),
     ...quotedValueSpans(text, QUOTED_NAMED_VALUE),

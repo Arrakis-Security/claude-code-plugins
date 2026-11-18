@@ -82,6 +82,61 @@ test('still hides a random-looking value after a URL in later results', () => {
   expect(vault.mask(`{"dsn":"admin:${password}@db"}`).text).not.toContain(password)
 })
 
+test('keeps hiding a short URL password in later results when the user name holds a quote and a comma', () => {
+  const password = ['hun', 'ter2'].join('')
+  const urls = [
+    `postgres://o',x:${password}@db.example.com/app`,
+    `postgres://a"}b:${password}@db.example.com/app`,
+    `'postgres://o",x:${password}@db.example.com/app'`,
+  ]
+  for (const url of urls) {
+    const vault = new Vault()
+    vault.mask(url)
+    expect({ url, count: vault.mask(`echo ${password}`).count }).toEqual({ url, count: 1 })
+  }
+})
+
+test('reads a JSON value after a URL as the next field wherever the URL sits in its string', () => {
+  const value = ['"me', ':x'].join('')
+  const lines = [
+    `{"msg":"see https://example.com","contact":${value}@example.com"}`,
+    `{"url":"jdbc:postgresql://db.example.com","contact":${value}@example.com"}`,
+    `{"url":"(https://example.com)","contact":${value}@example.com"}`,
+    `{"url":"https://example.com?q=it's","contact":${value}@example.com"}`,
+    `{\\"url\\":\\"https://example.com\\",\\"contact\\":\\${value}@example.com\\"}`,
+  ]
+  for (const line of lines) {
+    const vault = new Vault()
+    expect({ line, count: vault.mask(line).count }).toEqual({ line, count: 1 })
+    const later = `{"contact":${value}"}`
+    expect({ line, later: vault.mask(later).text }).toEqual({ line, later })
+  }
+})
+
+test('leaves a claude.ai or Jira link alone only when it starts its own URL', () => {
+  const id = RANDOM.slice(0, 22)
+  const safe = [
+    `[demo](https://claude.ai/artifact/${id})`,
+    `<https://claude.ai/artifact/${id}|demo>`,
+    `"https://claude.ai/artifact/${id}"`,
+    `"line\\nhttps://claude.ai/artifact/${id}"`,
+    `<p>https://claude.ai/artifact/${id}</p>`,
+    `url=https://claude.ai/artifact/${id}`,
+    `name,https://claude.ai/artifact/${id}`,
+    `**https://claude.ai/artifact/${id}**`,
+    `"see\\thttps://${ATLASSIAN}/browse/PROJ-1?atlOrigin=eyJ${RANDOM}"`,
+  ]
+  for (const text of safe) expect({ text, spans: secretSpans(text) }).toEqual({ text, spans: [] })
+  const hidden = [
+    `https://evil.example/r?next=https://claude.ai/artifact/${id}`,
+    `https://evil.example/r?next=(https://claude.ai/artifact/${id})`,
+    `https://evil.example/r?next=[https://claude.ai/artifact/${id}]`,
+    `https://evil.example/https://claude.ai/code/artifact/${id}`,
+    `https://evil.example/r?next=https://${ATLASSIAN}/browse/PROJ-1?atlOrigin=eyJ${RANDOM}`,
+  ]
+  for (const text of hidden) expect({ text, found: secretSpans(text).length > 0 }).toEqual({ text, found: true })
+})
+
 test('still hides a random token that is not under an id key', () => {
   expect(secretSpans(`value: ${RANDOM}`)).toHaveLength(1)
 })
