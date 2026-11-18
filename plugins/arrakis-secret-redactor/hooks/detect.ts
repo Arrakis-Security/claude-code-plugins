@@ -24,6 +24,9 @@ const VENDOR_SHAPES: readonly (readonly [string, RegExp])[] = [
   ['1Password token', /\bops_[A-Za-z0-9_-]{20,}/g],
   [PRIVATE_KEY, /-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----/g],
 ]
+const BEARER_KIND = 'Bearer token'
+// The kinds a rule names by itself; every other kind is a name read from the text.
+export const RULE_KINDS: ReadonlySet<string> = new Set([...VENDOR_SHAPES.map(([kind]) => kind), URL_PASSWORD_KIND, BEARER_KIND, RANDOM_TOKEN])
 
 const SECRET_NAMES = String.raw`[A-Za-z0-9_]{0,64}(?:secret|password|passwd|pwd|token|api[_-]?key|private[_-]?key|access[_-]?key|credential)[A-Za-z0-9_]{0,64}`
 const MIN_NAMED_VALUE = 6
@@ -248,7 +251,7 @@ export function secretSpans(text: string): Span[] {
     ...groupSpans(text, NAMED_VALUE, nameIn, () => true).filter(s => !NOT_A_SECRET_VALUE.test(text.slice(s.start, s.end)) && !isRegexLiteral(text, s.start)).flatMap(s => withPartBeforeHash(text, s)),
     // A letters-only URL password is a word like "postgres", and one after fields of a JSON line is the start of the next value: both stay hidden only where the rule finds them.
     ...groupSpans(text, URL_PASSWORD, () => URL_PASSWORD_KIND, (value, lead, at) => isPlainWord(value) || crossesFields(text, at, lead)),
-    ...groupSpans(text, BEARER, () => 'Bearer token'),
+    ...groupSpans(text, BEARER, () => BEARER_KIND),
     ...withoutRandomIds(text, highEntropySpans(text)),
     ...quotedValueSpans(text, QUOTED_NAMED_VALUE),
     ...quotedValueSpans(text, ESCAPED_JSON_NAMED_VALUE),

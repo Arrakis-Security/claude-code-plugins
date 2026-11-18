@@ -1,4 +1,4 @@
-import { PRIVATE_KEY, RANDOM_TOKEN, secretSpans } from './detect'
+import { PRIVATE_KEY, RANDOM_TOKEN, RULE_KINDS, secretSpans } from './detect'
 
 // Also matches the untagged `‹SECRET_n›` of earlier versions, so a placeholder from an old transcript is still caught.
 export const PLACEHOLDER = /‹SECRET_(?:[a-z0-9]+_)?\d+›/g
@@ -9,10 +9,11 @@ const looksRandom = (value: string): boolean => value.length >= 8 && /[A-Za-z]/.
 const MIN_REPLAYED_LENGTH = 6
 const MIN_PREVIEWED_LENGTH = 20
 const PREVIEW_LENGTH = 4
+const PREVIEW_SEPARATOR = ' …'
 
 function describe(kind: string | undefined, value: string): string {
   const name = kind ?? 'secret'
-  return value.length >= MIN_PREVIEWED_LENGTH && kind !== PRIVATE_KEY ? `${name} …${value.slice(-PREVIEW_LENGTH)}` : name
+  return value.length >= MIN_PREVIEWED_LENGTH && kind !== PRIVATE_KEY ? `${name}${PREVIEW_SEPARATOR}${value.slice(-PREVIEW_LENGTH)}` : name
 }
 
 const randomTag = (): string => Math.floor(Math.random() * 36 ** 8).toString(36).padStart(8, '0')
@@ -33,8 +34,8 @@ export class Vault {
   private remember(value: string, named: boolean | undefined, isPiece: boolean, kind: string | undefined): void {
     if (named === true && !looksRandom(value)) return
     if (isPiece && (value.length < MIN_REPLAYED_LENGTH || /^\d+$/.test(value))) return
-    if (this.replayable.has(value)) return
     this.placeholderOf(value, kind)
+    if (this.replayable.has(value)) return
     this.replayable.add(value)
     const at = this.replayOrder.findIndex(known => known.length < value.length)
     this.replayOrder.splice(at === -1 ? this.replayOrder.length : at, 0, value)
@@ -47,7 +48,7 @@ export class Vault {
       this.byValue.set(value, placeholder)
       this.byPlaceholder.set(placeholder, value)
       this.labels.set(value, describe(kind, value))
-    } else if (kind !== undefined && kind !== RANDOM_TOKEN && this.labels.get(value)!.startsWith(RANDOM_TOKEN)) {
+    } else if (kind === PRIVATE_KEY || (kind !== undefined && kind !== RANDOM_TOKEN && this.labels.get(value)!.startsWith(RANDOM_TOKEN))) {
       this.labels.set(value, describe(kind, value))
     }
     return placeholder
@@ -57,10 +58,13 @@ export class Vault {
     return this.byPlaceholder.has(placeholder)
   }
 
-  // A name can hold a value the vault learned from another line, so a label is checked when it is shown.
+  // A name read from the text can hold any value the vault hid in another line, replayed or not, so it is checked when shown.
   private labelOf(value: string): string {
     const label = this.labels.get(value)!
-    return this.replayOrder.some(known => label.includes(known)) ? 'secret' : label
+    const name = label.split(PREVIEW_SEPARATOR)[0]!
+    if (RULE_KINDS.has(name)) return label
+    for (const known of this.byValue.keys()) if (name.includes(known)) return 'secret'
+    return label
   }
 
   // Known values are swapped too, so a secret seen once stays covered where no rule would catch it again.
@@ -68,13 +72,13 @@ export class Vault {
     let count = 0
     let out = ''
     let at = 0
-    const hidden = new Set<string>()
+    const found: string[] = []
     for (const span of secretSpans(text)) {
       const value = text.slice(span.start, span.end)
       out += text.slice(at, span.start) + this.placeholderOf(value, span.kind)
       this.remember(value, span.named, false, span.kind)
       for (const part of span.parts ?? []) this.remember(text.slice(part.start, part.end), part.named, true, part.kind)
-      hidden.add(this.labelOf(value))
+      found.push(value)
       at = span.end
       count += 1
     }
@@ -83,11 +87,12 @@ export class Vault {
       const placeholder = this.byValue.get(value)!
       if (out.includes(value)) {
         count += out.split(value).length - 1
-        hidden.add(this.labelOf(value))
+        found.push(value)
         out = out.split(value).join(placeholder)
       }
     }
-    return { text: out, count, hidden }
+    // Labelled last, so a name is checked against every value this text hid, also ones found after it.
+    return { text: out, count, hidden: new Set(found.map(value => this.labelOf(value))) }
   }
 
   unmask(text: string): string {

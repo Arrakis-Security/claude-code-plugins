@@ -80,6 +80,40 @@ test('labels each kind of secret, and the private key wins where matches overlap
   for (const [text, labels] of cases) expect({ text, hidden: new Vault('t').mask(text).hidden }).toEqual({ text, hidden: new Set(labels) })
 })
 
+test('shows no characters of a key line that was seen alone before its private key', () => {
+  const pem = ['-----BEGIN ', 'PRIVATE KEY-----\n', LONG, '\n', SHORT, LONG.slice(0, 10), '\n-----END ', 'PRIVATE KEY-----'].join('')
+  const vault = new Vault('t')
+  expect(vault.mask(`found ${LONG}`).hidden).toEqual(new Set([`random-looking token …${LONG.slice(-4)}`]))
+  vault.mask(pem)
+  expect(vault.mask(`found ${LONG}`).hidden).toEqual(new Set(['private key']))
+  expect(vault.mask(`DB_PASSWORD=${LONG}`).hidden).toEqual(new Set(['private key']))
+})
+
+test('names a secret "secret" when its name holds a value hidden only in its own line', () => {
+  const word = ['hun', 'ter'].join('')
+  const vault = new Vault('t')
+  expect(vault.mask(`password: ${word}`).count).toBe(1)
+  expect(vault.mask(`${word}_TOKEN=whatever1`).hidden).toEqual(new Set(['secret']))
+})
+
+test('checks a name against a value hidden later in the same text', () => {
+  const password = ['hunter', '22'].join('')
+  expect(new Vault('t').mask(`${password}_TOKEN=abcdefgh1\npassword: ${password}`).hidden).toEqual(new Set(['secret', 'password']))
+})
+
+test('names a replayed random token by the name it later shows under', () => {
+  const vault = new Vault('t')
+  vault.mask(`x ${LONG} y`)
+  vault.mask(`MY_TOKEN=${LONG}#zz`)
+  expect(vault.mask(`seen ${LONG}`).hidden).toEqual(new Set([`MY_TOKEN …${LONG.slice(-4)}`]))
+})
+
+test('keeps a label a rule gives, even when it holds a short value hidden earlier', () => {
+  const vault = new Vault('t')
+  vault.mask('postgres://u:pass@db.example.com/app')
+  expect(vault.mask(`postgres://app:${LONG}@db.example.com/app`).hidden).toEqual(new Set([`URL password …${LONG.slice(-4)}`]))
+})
+
 test('shows no characters of a private key line seen again on its own', () => {
   const pem = ['-----BEGIN ', 'PRIVATE KEY-----\n', LONG, '\n', SHORT, LONG.slice(0, 10), '\n-----END ', 'PRIVATE KEY-----'].join('')
   const vault = new Vault('t')
