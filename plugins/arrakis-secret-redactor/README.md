@@ -56,7 +56,7 @@ The line under the chat input counts what the plugin hid:
 ## What it detects
 
 - Token formats from known vendors: Anthropic, OpenAI, GitHub, Slack, Stripe, AWS access key IDs, 1Password service account tokens, and PEM (Privacy-Enhanced Mail format) private keys
-- A value under a name that points at a secret, such as `DB_PASSWORD=`, `"clientSecret":` or `api_key:`. An unquoted value runs to the next space, quote, `,` or `;`, so it may hold a `#`. A value that starts with `#` is a comment and stays visible, with or without a space before it. A quoted value is hidden whole, spaces and escaped quotes included, in plain or escaped JSON, when its closing quote ends the line or comes before `,`, `;`, `)`, `}`, `]` or a `#` comment.
+- A value under a name that points at a secret, such as `DB_PASSWORD=`, `"clientSecret":` or `api_key:`. An unquoted value runs to the next space, quote, `,` or `;`, so it may hold a `#`. A `#` after a space starts a comment and stays visible. A quoted value is hidden whole, spaces and escaped quotes included, in plain or escaped JSON, when its closing quote ends the line or comes before `,`, `;`, `)`, `}`, `]` or a `#` comment.
 - The password in a URL such as `postgres://user:password@host`, up to the last `@` before the host, so a password may hold `@`, `#`, `?` or `'`
 - A `Bearer` token
 - A long random-looking string (one with high Shannon entropy, a measure of how random the characters are)

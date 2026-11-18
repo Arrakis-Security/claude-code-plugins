@@ -41,10 +41,14 @@ test('leaves a "#" comment right after the "=" or ":" visible, in this result an
   }
 })
 
-test('reads a value that starts with "#" as a comment, with no space after the "=" or ":"', () => {
-  const colour = ['#1a2', 'b3c4d'].join('')
+test('hides a value that starts with "#" right after the "=" or ":"', () => {
+  const password = ['#Xk29', 'abQ7'].join('')
+  expect(new Vault('t').mask(`DB_PASSWORD=${password}`).text).toBe(`DB_PASSWORD=${FIRST}`)
+})
+
+test('leaves Ruby and Elixir interpolation under a secret name visible', () => {
   const vault = new Vault('t')
-  for (const text of ['API_KEY=#required', 'api_token:#required', 'password=#{ENV}', `.a{--brand-token:${colour}}`, `$focus-token:${colour};`]) {
+  for (const text of ['password=#{ENV}', "api_token=#{ENV['API_TOKEN']}", 'puts "token=#{token}"']) {
     expect(vault.mask(text)).toEqual({ text, count: 0, hidden: new Set() })
   }
 })

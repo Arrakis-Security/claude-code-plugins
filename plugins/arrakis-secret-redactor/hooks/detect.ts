@@ -30,12 +30,12 @@ const MIN_NAMED_VALUE = 6
 const MIN_URL_PASSWORD = 3
 
 // The secret is group 2: `DB_PASSWORD=hunter22`, `"clientSecret": "abc"`, `api_key: abc`.
-const NAMED_VALUE = new RegExp(String.raw`(\b${SECRET_NAMES}["']?\s*[=:]\s*["']?)((?!#)[^\s"'\`,;]{${MIN_NAMED_VALUE},})`, 'gi')
+const NAMED_VALUE = new RegExp(String.raw`(\b${SECRET_NAMES}["']?\s*[=:]\s*["']?)((?:(?<!\s)|(?!#))[^\s"'\`,;]{${MIN_NAMED_VALUE},})`, 'gi')
 
 // A type, a literal or a pointer to where the value lives is not the value: `credentialsValid: boolean`, `key = process.env.KEY`.
 const TYPE_WORDS = 'boolean|string|number|bigint|object|unknown|any|void|never|null|undefined|true|false'
 const POINTERS = String.raw`process\.env\.|os\.environ|var\.|local\.`
-const NOT_A_SECRET_VALUE = new RegExp(String.raw`^(?:(?:${TYPE_WORDS})\b|\$\{?[A-Za-z_]|${POINTERS})`, 'i')
+const NOT_A_SECRET_VALUE = new RegExp(String.raw`^(?:(?:${TYPE_WORDS})\b|\$\{?[A-Za-z_]|#\{|${POINTERS})`, 'i')
 // Inside quotes only the whole value is a type, literal or variable: `"string"` and `"${TOKEN}"` are, `"$uperman1!"` and`"null&Void#2024x"` are passwords.
 const NOT_A_QUOTED_SECRET = new RegExp(String.raw`^(?:(?:${TYPE_WORDS})$|\$(?:\{[A-Za-z_][A-Za-z0-9_]*\}|(?:env:)?[A-Za-z_][A-Za-z0-9_]*)$|${POINTERS})`, 'i')
 
