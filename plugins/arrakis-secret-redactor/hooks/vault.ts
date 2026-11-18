@@ -1,4 +1,4 @@
-import { secretSpans } from './detect'
+import { PRIVATE_KEY, RANDOM_TOKEN, secretSpans } from './detect'
 
 // Also matches the untagged `‹SECRET_n›` of earlier versions, so a placeholder from an old transcript is still caught.
 export const PLACEHOLDER = /‹SECRET_(?:[a-z0-9]+_)?\d+›/g
@@ -7,12 +7,20 @@ export const PLACEHOLDER = /‹SECRET_(?:[a-z0-9]+_)?\d+›/g
 const looksRandom = (value: string): boolean => value.length >= 8 && /[A-Za-z]/.test(value) && /[0-9]/.test(value)
 
 const MIN_REPLAYED_LENGTH = 6
+const MIN_PREVIEWED_LENGTH = 20
+const PREVIEW_LENGTH = 4
+
+function describe(kind: string | undefined, value: string): string {
+  const name = kind ?? 'secret'
+  return value.length >= MIN_PREVIEWED_LENGTH && kind !== PRIVATE_KEY ? `${name} …${value.slice(-PREVIEW_LENGTH)}` : name
+}
 
 const randomTag = (): string => Math.floor(Math.random() * 36 ** 8).toString(36).padStart(8, '0')
 
 export class Vault {
   private byValue = new Map<string, string>()
   private byPlaceholder = new Map<string, string>()
+  private labels = new Map<string, string>()
   // A plain word caught only by its name stays masked there; replaying it everywhere hid words like "boolean" from every later result.
   private replayable = new Set<string>()
   // Longest first, so a shorter value never splits a longer one and leaves its tail visible.
@@ -22,22 +30,25 @@ export class Vault {
   constructor(private readonly tag: string = randomTag()) {}
 
   // A short or all-digit piece of a wider match is a fragment such as a year, not the secret.
-  private remember(value: string, named: boolean | undefined, isPiece: boolean): void {
+  private remember(value: string, named: boolean | undefined, isPiece: boolean, kind: string | undefined): void {
     if (named === true && !looksRandom(value)) return
     if (isPiece && (value.length < MIN_REPLAYED_LENGTH || /^\d+$/.test(value))) return
     if (this.replayable.has(value)) return
-    this.placeholderOf(value)
+    this.placeholderOf(value, kind)
     this.replayable.add(value)
     const at = this.replayOrder.findIndex(known => known.length < value.length)
     this.replayOrder.splice(at === -1 ? this.replayOrder.length : at, 0, value)
   }
 
-  private placeholderOf(value: string): string {
+  private placeholderOf(value: string, kind: string | undefined): string {
     let placeholder = this.byValue.get(value)
     if (placeholder === undefined) {
       placeholder = `‹SECRET_${this.tag}_${this.byValue.size + 1}›`
       this.byValue.set(value, placeholder)
       this.byPlaceholder.set(placeholder, value)
+      this.labels.set(value, describe(kind, value))
+    } else if (kind !== undefined && kind !== RANDOM_TOKEN && this.labels.get(value)!.startsWith(RANDOM_TOKEN)) {
+      this.labels.set(value, describe(kind, value))
     }
     return placeholder
   }
@@ -46,15 +57,24 @@ export class Vault {
     return this.byPlaceholder.has(placeholder)
   }
 
+  // A name can hold a value the vault learned from another line, so a label is checked when it is shown.
+  private labelOf(value: string): string {
+    const label = this.labels.get(value)!
+    return this.replayOrder.some(known => label.includes(known)) ? 'secret' : label
+  }
+
   // Known values are swapped too, so a secret seen once stays covered where no rule would catch it again.
-  mask(text: string): { text: string; count: number } {
+  mask(text: string): { text: string; count: number; hidden: Set<string> } {
     let count = 0
     let out = ''
     let at = 0
+    const hidden = new Set<string>()
     for (const span of secretSpans(text)) {
-      out += text.slice(at, span.start) + this.placeholderOf(text.slice(span.start, span.end))
-      this.remember(text.slice(span.start, span.end), span.named, false)
-      for (const part of span.parts ?? []) this.remember(text.slice(part.start, part.end), part.named, true)
+      const value = text.slice(span.start, span.end)
+      out += text.slice(at, span.start) + this.placeholderOf(value, span.kind)
+      this.remember(value, span.named, false, span.kind)
+      for (const part of span.parts ?? []) this.remember(text.slice(part.start, part.end), part.named, true, part.kind)
+      hidden.add(this.labelOf(value))
       at = span.end
       count += 1
     }
@@ -63,10 +83,11 @@ export class Vault {
       const placeholder = this.byValue.get(value)!
       if (out.includes(value)) {
         count += out.split(value).length - 1
+        hidden.add(this.labelOf(value))
         out = out.split(value).join(placeholder)
       }
     }
-    return { text: out, count }
+    return { text: out, count, hidden }
   }
 
   unmask(text: string): string {
@@ -129,11 +150,14 @@ export function isEncodedMedia(field: string, value: unknown, mediaType: string 
   return header !== undefined && MEDIA_FIELDS.has(field) && typeof value === 'string' && BASE64.test(value) && header.test(firstBytes(value))
 }
 
+export type Tally = { count: number; hidden: Set<string> }
+
 // Rebuilds the value with every string masked; a shape it cannot rebuild faithfully is refused, never passed through.
-export function maskDeep(value: unknown, vault: Vault, tally: { count: number }, mediaFromParent?: string): unknown {
+export function maskDeep(value: unknown, vault: Vault, tally: Tally, mediaFromParent?: string): unknown {
   if (typeof value === 'string') {
     const masked = vault.mask(value)
     tally.count += masked.count
+    for (const label of masked.hidden) tally.hidden.add(label)
     return masked.text
   }
   if (value === null || typeof value !== 'object') return value

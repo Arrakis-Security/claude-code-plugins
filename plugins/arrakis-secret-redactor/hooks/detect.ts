@@ -2,24 +2,27 @@
 
 // `named`: only a rule that reads the text around it caught it (a name, a URL's user part for a plain word, or a user part that crosses JSON fields), so that text is the evidence, not the value.
 // `parts`: the spans a wider one absorbed, so each value a rule found alone is still hidden again later.
-export type Span = { start: number; end: number; named?: boolean; parts?: Span[] }
+export type Span = { start: number; end: number; named?: boolean; parts?: Span[]; kind?: string }
 
 const ENTROPY_MIN_LENGTH = 20
 // Hex (git shas, hashes) tops out at 4.0 bits per character and a UUID at 4.09, so neither can cross 4.3.
 const ENTROPY_THRESHOLD = 4.3
+export const RANDOM_TOKEN = 'random-looking token'
+export const PRIVATE_KEY = 'private key'
+const URL_PASSWORD_KIND = 'URL password'
 // "=" counts only as base64 padding at the end, so `KEY=value` scores the value alone.
 const TOKEN_RUN = /[A-Za-z0-9+/_-]{20,}={0,2}/g
 
-const VENDOR_SHAPES: readonly RegExp[] = [
-  /sk-ant-[A-Za-z0-9_-]{20,}/g,
-  /\bsk-[A-Za-z0-9_-]{20,}/g,
-  /\bgh[pousr]_[A-Za-z0-9]{20,}/g,
-  /\bgithub_pat_[A-Za-z0-9_]{20,}/g,
-  /\bxox[abprs]-[A-Za-z0-9-]{10,}/g,
-  /\b[sr]k_live_[A-Za-z0-9]{16,}/g,
-  /\bAKIA[0-9A-Z]{16}\b/g,
-  /\bops_[A-Za-z0-9_-]{20,}/g,
-  /-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----/g,
+const VENDOR_SHAPES: readonly (readonly [string, RegExp])[] = [
+  ['Anthropic key', /sk-ant-[A-Za-z0-9_-]{20,}/g],
+  ['OpenAI key', /\bsk-[A-Za-z0-9_-]{20,}/g],
+  ['GitHub token', /\bgh[pousr]_[A-Za-z0-9]{20,}/g],
+  ['GitHub token', /\bgithub_pat_[A-Za-z0-9_]{20,}/g],
+  ['Slack token', /\bxox[abprs]-[A-Za-z0-9-]{10,}/g],
+  ['Stripe key', /\b[sr]k_live_[A-Za-z0-9]{16,}/g],
+  ['AWS access key', /\bAKIA[0-9A-Z]{16}\b/g],
+  ['1Password token', /\bops_[A-Za-z0-9_-]{20,}/g],
+  [PRIVATE_KEY, /-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----/g],
 ]
 
 const SECRET_NAMES = String.raw`[A-Za-z0-9_]{0,64}(?:secret|password|passwd|pwd|token|api[_-]?key|private[_-]?key|access[_-]?key|credential)[A-Za-z0-9_]{0,64}`
@@ -27,7 +30,7 @@ const MIN_NAMED_VALUE = 6
 const MIN_URL_PASSWORD = 3
 
 // The secret is group 2: `DB_PASSWORD=hunter22`, `"clientSecret": "abc"`, `api_key: abc`.
-const NAMED_VALUE = new RegExp(String.raw`(\b${SECRET_NAMES}["']?\s*[=:]\s*["']?)([^\s"'\`,;#]{${MIN_NAMED_VALUE},})`, 'gi')
+const NAMED_VALUE = new RegExp(String.raw`(\b${SECRET_NAMES}["']?\s*[=:]\s*["']?)((?!#)[^\s"'\`,;]{${MIN_NAMED_VALUE},})`, 'gi')
 
 // A type, a literal or a pointer to where the value lives is not the value: `credentialsValid: boolean`, `key = process.env.KEY`.
 const TYPE_WORDS = 'boolean|string|number|bigint|object|unknown|any|void|never|null|undefined|true|false'
@@ -116,7 +119,7 @@ function highEntropySpans(text: string): Span[] {
     const parts = run.replace(/=+$/, '').split(/[/_+-]/)
     // A run with no word in it is one token (base64url keys hold "-" and "_"); a run with words scores each odd part alone.
     if (!parts.some(p => p.length > 0 && isWordLike(p))) {
-      if (shannonEntropy(run) >= ENTROPY_THRESHOLD) spans.push({ start: m.index!, end: m.index! + run.length })
+      if (shannonEntropy(run) >= ENTROPY_THRESHOLD) spans.push({ start: m.index!, end: m.index! + run.length, kind: RANDOM_TOKEN })
       continue
     }
     let at = 0
@@ -124,7 +127,7 @@ function highEntropySpans(text: string): Span[] {
       const start = m.index! + run.indexOf(part, at)
       at = start - m.index! + part.length
       if (!isWordLike(part) && part.length >= ENTROPY_MIN_LENGTH && shannonEntropy(part) >= ENTROPY_THRESHOLD) {
-        spans.push({ start, end: start + part.length })
+        spans.push({ start, end: start + part.length, kind: RANDOM_TOKEN })
       }
     }
   }
@@ -133,15 +136,31 @@ function highEntropySpans(text: string): Span[] {
 
 const isPlainWord = (value: string): boolean => /^[A-Za-z]+$/.test(value)
 
-function groupSpans(text: string, pattern: RegExp, isNamed: (value: string, lead: string, at: number) => boolean = () => false): Span[] {
+const nameIn = (lead: string): string => {
+  const name = /[\w-]+/.exec(lead)![0]
+  return secretSpans(name).length === 0 ? name : 'secret'
+}
+
+function groupSpans(
+  text: string,
+  pattern: RegExp,
+  kindOf: (lead: string) => string,
+  isNamed: (value: string, lead: string, at: number) => boolean = () => false,
+): Span[] {
   return [...text.matchAll(pattern)].map(m => {
     const start = m.index! + m[1]!.length
-    return { start, end: start + m[2]!.length, named: isNamed(m[2]!, m[1]!, m.index!) }
+    return { start, end: start + m[2]!.length, named: isNamed(m[2]!, m[1]!, m.index!), kind: kindOf(m[1]!) }
   })
 }
 
-function wholeSpans(text: string, pattern: RegExp): Span[] {
-  return [...text.matchAll(pattern)].map(m => ({ start: m.index!, end: m.index! + m[0].length }))
+// dotenv reads `abc12345#prod` as `abc12345` and a comment, so the part before the "#" is hidden again later too.
+function withPartBeforeHash(text: string, span: Span): Span[] {
+  const hash = text.indexOf('#', span.start)
+  return hash > span.start && hash < span.end ? [span, { ...span, end: hash }] : [span]
+}
+
+function wholeSpans(text: string, pattern: RegExp, kind?: string): Span[] {
+  return [...text.matchAll(pattern)].map(m => ({ start: m.index!, end: m.index! + m[0].length, kind }))
 }
 
 function withoutRandomIds(text: string, spans: Span[]): Span[] {
@@ -160,6 +179,12 @@ function union(spans: Span[]): Span[] {
       last.end = Math.max(last.end, s.end)
       last.named = last.named === true && s.named === true
     } else merged.push({ ...s })
+  }
+  // A key line seen again on its own keeps the private-key label, so the notice never shows its characters.
+  for (const span of merged) {
+    if (span.kind !== PRIVATE_KEY && !span.parts?.some(p => p.kind === PRIVATE_KEY)) continue
+    span.kind = PRIVATE_KEY
+    for (const part of span.parts ?? []) part.kind = PRIVATE_KEY
   }
   return merged
 }
@@ -190,7 +215,8 @@ function quotedValueSpans(text: string, pattern: RegExp): Span[] {
     if (NOT_A_QUOTED_SECRET.test(value) || CONCATENATED.test(value)) return []
     const [start, end] = m.indices![group]!
     const shell = SHELL_DEFAULT.exec(value)
-    return [shell ? { start: start + shell[1]!.length, end: end - 1, named: true } : { start, end, named: true }]
+    const kind = nameIn(m[1]!)
+    return [shell ? { start: start + shell[1]!.length, end: end - 1, named: true, kind } : { start, end, named: true, kind }]
   })
 }
 
@@ -211,18 +237,18 @@ function urlAuthoritySpans(text: string): Span[] {
       HOST_AFTER_AT.lastIndex = at + 1
       if (at - start >= MIN_URL_PASSWORD && HOST_AFTER_AT.test(text)) end = at
     }
-    if (end !== -1) spans.push({ start, end, named: isPlainWord(text.slice(start, end)) || crossesFields(text, m.index!, m[0]) })
+    if (end !== -1) spans.push({ start, end, named: isPlainWord(text.slice(start, end)) || crossesFields(text, m.index!, m[0]), kind: URL_PASSWORD_KIND })
   }
   return spans
 }
 
 export function secretSpans(text: string): Span[] {
   return union([
-    ...VENDOR_SHAPES.flatMap(p => wholeSpans(text, p)),
-    ...groupSpans(text, NAMED_VALUE, () => true).filter(s => !NOT_A_SECRET_VALUE.test(text.slice(s.start, s.end)) && !isRegexLiteral(text, s.start)),
+    ...VENDOR_SHAPES.flatMap(([kind, p]) => wholeSpans(text, p, kind)),
+    ...groupSpans(text, NAMED_VALUE, nameIn, () => true).filter(s => !NOT_A_SECRET_VALUE.test(text.slice(s.start, s.end)) && !isRegexLiteral(text, s.start)).flatMap(s => withPartBeforeHash(text, s)),
     // A letters-only URL password is a word like "postgres", and one after fields of a JSON line is the start of the next value: both stay hidden only where the rule finds them.
-    ...groupSpans(text, URL_PASSWORD, (value, lead, at) => isPlainWord(value) || crossesFields(text, at, lead)),
-    ...groupSpans(text, BEARER),
+    ...groupSpans(text, URL_PASSWORD, () => URL_PASSWORD_KIND, (value, lead, at) => isPlainWord(value) || crossesFields(text, at, lead)),
+    ...groupSpans(text, BEARER, () => 'Bearer token'),
     ...withoutRandomIds(text, highEntropySpans(text)),
     ...quotedValueSpans(text, QUOTED_NAMED_VALUE),
     ...quotedValueSpans(text, ESCAPED_JSON_NAMED_VALUE),
