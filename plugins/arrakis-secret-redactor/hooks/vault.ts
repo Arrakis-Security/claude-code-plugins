@@ -69,6 +69,16 @@ export class Vault {
 
   // Known values are swapped too, so a secret seen once stays covered where no rule would catch it again.
   mask(text: string): { text: string; count: number; hidden: Set<string> } {
+    const { found, ...masked } = this.maskFinding(text)
+    return { ...masked, hidden: this.labelsOf(found) }
+  }
+
+  // Labelled only once every text of a result is masked, so a name is checked against every value the result hid.
+  labelsOf(values: Iterable<string>): Set<string> {
+    return new Set([...values].map(value => this.labelOf(value)))
+  }
+
+  maskFinding(text: string): { text: string; count: number; found: string[] } {
     let count = 0
     let out = ''
     let at = 0
@@ -91,8 +101,7 @@ export class Vault {
         out = out.split(value).join(placeholder)
       }
     }
-    // Labelled last, so a name is checked against every value this text hid, also ones found after it.
-    return { text: out, count, hidden: new Set(found.map(value => this.labelOf(value))) }
+    return { text: out, count, found }
   }
 
   unmask(text: string): string {
@@ -155,14 +164,14 @@ export function isEncodedMedia(field: string, value: unknown, mediaType: string 
   return header !== undefined && MEDIA_FIELDS.has(field) && typeof value === 'string' && BASE64.test(value) && header.test(firstBytes(value))
 }
 
-export type Tally = { count: number; hidden: Set<string> }
+export type Tally = { count: number; found: Set<string> }
 
 // Rebuilds the value with every string masked; a shape it cannot rebuild faithfully is refused, never passed through.
 export function maskDeep(value: unknown, vault: Vault, tally: Tally, mediaFromParent?: string): unknown {
   if (typeof value === 'string') {
-    const masked = vault.mask(value)
+    const masked = vault.maskFinding(value)
     tally.count += masked.count
-    for (const label of masked.hidden) tally.hidden.add(label)
+    for (const found of masked.found) tally.found.add(found)
     return masked.text
   }
   if (value === null || typeof value !== 'object') return value

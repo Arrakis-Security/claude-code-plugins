@@ -96,6 +96,21 @@ test('names a secret "secret" when its name holds a value hidden only in its own
   expect(vault.mask(`${word}_TOKEN=whatever1`).hidden).toEqual(new Set(['secret']))
 })
 
+test('checks a name against a value hidden in a later field of the same result', async ($, on) => {
+  const password = ['hunter', '22'].join('')
+  const toasts: string[] = []
+  on('env.get', () => ({ value: undefined }))
+  on('ui.toast', (_$, e) => {
+    toasts.push(e.text)
+    return { value: undefined }
+  })
+  on('tool.call', () => ({ result: { stdout: `${password}_TOKEN=abcdefgh1`, stderr: `password: ${password}`, interrupted: false } }))
+
+  await $.tool.call({ tool: 'Bash', command: 'cat .env' } as never)
+
+  expect(toasts).toEqual(['Arrakis Secret Redactor: hid 2 secret(s) from Bash: secret, password'])
+})
+
 test('checks a name against a value hidden later in the same text', () => {
   const password = ['hunter', '22'].join('')
   expect(new Vault('t').mask(`${password}_TOKEN=abcdefgh1\npassword: ${password}`).hidden).toEqual(new Set(['secret', 'password']))

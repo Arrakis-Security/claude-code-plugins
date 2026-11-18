@@ -48,11 +48,11 @@ export function countLine(count: number): string {
 
 const MAX_NAMED_IN_NOTICE = 3
 
-function hiddenNotice(tally: Tally, tool: string): string {
-  const kinds = [...tally.hidden]
+function hiddenNotice(count: number, labels: Set<string>, tool: string): string {
+  const kinds = [...labels]
   const named = kinds.slice(0, MAX_NAMED_IN_NOTICE).join(', ')
   const more = kinds.length > MAX_NAMED_IN_NOTICE ? ` +${kinds.length - MAX_NAMED_IN_NOTICE} more` : ''
-  return `${NAME}: hid ${tally.count} secret(s) from ${tool}: ${named}${more}`
+  return `${NAME}: hid ${count} secret(s) from ${tool}: ${named}${more}`
 }
 
 export function introduced(newText: string, oldText: string): string[] {
@@ -121,7 +121,7 @@ export const register: Register = on => {
     // A skill's instructions ride in the messages `ref` names; any rebuilt result would drop them.
     if (e.tool === 'Skill') return ran
 
-    const tally: Tally = { count: 0, hidden: new Set() }
+    const tally: Tally = { count: 0, found: new Set() }
     // A failed call's result is bare text that no rebuilt result passes validation as; its masked text goes back as the refusal.
     if (ran.isError) return { deny: vault.mask(String(ran.text ?? ran.result ?? '')).text }
 
@@ -130,7 +130,7 @@ export const register: Register = on => {
     // Nothing masked: return core's own answer, whose `ref` carries the messages core made, such as a skill's instructions.
     if (tally.count === 0) return ran
     maskedThisSession += tally.count
-    $.ui.toast(hiddenNotice(tally, e.tool))
+    $.ui.toast(hiddenNotice(tally.count, vault.labelsOf(tally.found), e.tool))
     $.ui.status(countLine(maskedThisSession))
     // A fresh object without `ref`: core would otherwise reuse the unmasked messages it produced.
     return { result, context, isError: ran.isError } as typeof ran
