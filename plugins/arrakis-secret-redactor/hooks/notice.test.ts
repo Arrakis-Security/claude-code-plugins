@@ -53,6 +53,21 @@ test('leaves Ruby and Elixir interpolation under a secret name visible', () => {
   }
 })
 
+test('hides the part before a "#" again later only when it looks random, as for any value caught by its name', () => {
+  const random = ['abc', '12345'].join('')
+  const word = ['hun', 'ter'].join('')
+  for (const [prefix, laterCount] of [[random, 1], [word, 0]] as const) {
+    const vault = new Vault('t')
+    expect({ prefix, first: vault.mask(`DB_PASSWORD=${prefix}#prod`).text }).toEqual({ prefix, first: `DB_PASSWORD=${FIRST}` })
+    expect({ prefix, later: vault.mask(`echo ${prefix}`).count }).toEqual({ prefix, later: laterCount })
+  }
+})
+
+test('hides a quoted value that holds a "#" whole', () => {
+  const quoted = ['ab#cd', ' ef12'].join('')
+  expect(new Vault('t').mask(`DB_PASSWORD="${quoted}"`).text).toBe(`DB_PASSWORD="${FIRST}"`)
+})
+
 test('hides the part before a "#" again in later results, as dotenv reads it', () => {
   const password = ['abc', '12345'].join('')
   const vault = new Vault('t')
@@ -94,6 +109,21 @@ test('names a secret "secret" when its name holds a value hidden only in its own
   const vault = new Vault('t')
   expect(vault.mask(`password: ${word}`).count).toBe(1)
   expect(vault.mask(`${word}_TOKEN=whatever1`).hidden).toEqual(new Set(['secret']))
+})
+
+test('checks a name in the result against a value hidden in the context', async ($, on) => {
+  const password = ['hunter', '22'].join('')
+  const toasts: string[] = []
+  on('env.get', () => ({ value: undefined }))
+  on('ui.toast', (_$, e) => {
+    toasts.push(e.text)
+    return { value: undefined }
+  })
+  on('tool.call', () => ({ result: { stdout: `${password}_TOKEN=abcdefgh1`, stderr: '', interrupted: false }, context: [`password: ${password}`] }) as never)
+
+  await $.tool.call({ tool: 'Bash', command: 'cat .env' } as never)
+
+  expect(toasts).toEqual(['Arrakis Secret Redactor: hid 2 secret(s) from Bash: secret, password'])
 })
 
 test('checks a name against a value hidden in a later field of the same result', async ($, on) => {

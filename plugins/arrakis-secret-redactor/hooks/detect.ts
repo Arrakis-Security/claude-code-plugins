@@ -42,25 +42,31 @@ const NOT_A_SECRET_VALUE = new RegExp(String.raw`^(?:(?:${TYPE_WORDS})\b|\$\{?[A
 // Inside quotes only the whole value is a type, literal or variable: `"string"` and `"${TOKEN}"` are, `"$uperman1!"` and`"null&Void#2024x"` are passwords.
 const NOT_A_QUOTED_SECRET = new RegExp(String.raw`^(?:(?:${TYPE_WORDS})$|\$(?:\{[A-Za-z_][A-Za-z0-9_]*\}|(?:env:)?[A-Za-z_][A-Za-z0-9_]*)$|${POINTERS})`, 'i')
 
-// Random by design and not a credential: a tool call's id, a log or trace id under its own key, a claude.ai artifact id, and the `atlOrigin` tag Atlassian adds to its links.
-// The two link ids match only in a link with no earlier "//" in the same run of URL characters, so not one inside another URL's path or query, on their own host and in their own shape, with nothing joined after them.
-const RANDOM_ID =
-  /\b(?:srv)?toolu_[A-Za-z0-9]{20,}|\b(?:event_id|trace_id|span_id|tool_use_id|request_id)["']?\s*[:=]\s*["']?[A-Za-z0-9_+/=-]+|(?<=(?<!\/\/[^\s"'`<>]*?)https:\/\/claude\.ai\/(?:code\/)?artifact\/)(?:[A-Za-z0-9]{22}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(?![A-Za-z0-9_+/=-])|(?<=(?<!\/\/[^\s"'`<>]*?)https:\/\/[a-z0-9-]+\.atlassian\.net\/[^\s?#"'<>]*\?(?:[^\s#"'<>&]*&)*atlOrigin=)eyJ[A-Za-z0-9_-]{8,512}(?![A-Za-z0-9_+/=-])/g
+// Random by design and not a credential: a tool call's id, and a log or trace id under its own key.
+const RANDOM_ID = /\b(?:srv)?toolu_[A-Za-z0-9]{20,}|\b(?:event_id|trace_id|span_id|tool_use_id|request_id)["']?\s*[:=]\s*["']?[A-Za-z0-9_+/=-]+/g
+// Also random by design: a claude.ai artifact id and the `atlOrigin` tag Atlassian adds to its links, in their own shape with nothing joined after them.
+const LINK_ID =
+  /(?<=https:\/\/claude\.ai\/(?:code\/)?artifact\/)(?:[A-Za-z0-9]{22}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(?![A-Za-z0-9_+/=-])|(?<=https:\/\/[a-z0-9-]+\.atlassian\.net\/[^\s?#"'<>]*\?(?:[^\s#"'<>&]*&)*atlOrigin=)eyJ[A-Za-z0-9_-]{8,512}(?![A-Za-z0-9_+/=-])/g
+// Whitespace, a double quote, a backtick or an angle bracket ends a URL; `'`, `\`, `|` and non-ASCII letters do not, so the parser decides.
+const URL_CHAR = /[^\s"`<>]/
+const SCHEME = /[A-Za-z][A-Za-z0-9+.-]*:\/\//
 
 // The password in `postgres://user:PASSWORD@host`.
 // The user name rule of 1.0.0, so every URL password 1.0.0 hid stays hidden, quotes in the user name included.
 const URL_USER_NAME = String.raw`[^\s:/@]+`
 const URL_PASSWORD = new RegExp(String.raw`(:\/\/${URL_USER_NAME}:)([^\s@/]{${MIN_URL_PASSWORD},})(@)`, 'gi')
-const CROSSES_FIELDS = /["'`]\s*[,}\]]/
-const ENDS_FIELD: Record<string, RegExp> = { '"': /"\s*[,}\]]/, "'": /'\s*[,}\]]/, '`': /`\s*[,}\]]/ }
+// The first quote in the user part that `,` `}` or `]` follows.
+const FIELD_END = /(["'`])\s*[,}\]]/
 
 // A user part ran across fields of a JSON line or a dict only when it closes the string value the URL sits in.
 // A user name may hold `'` and `,`, so outside such a value the password keeps its usual replay.
+// The value is opened by the same quote that closes it, so a `'` in prose such as `It's` does not end the search.
 function crossesFields(text: string, at: number, lead: string): boolean {
-  if (!CROSSES_FIELDS.test(lead)) return false
+  const quote = FIELD_END.exec(lead)?.[1]
+  if (quote === undefined) return false
   let open = at - 1
-  while (open >= 0 && !`"'\`\n`.includes(text[open]!)) open--
-  if (open < 0 || text[open] === '\n' || !ENDS_FIELD[text[open]!]!.test(lead)) return false
+  while (open >= 0 && text[open] !== quote && text[open] !== '\n') open--
+  if (open < 0 || text[open] === '\n') return false
   // A quote opens a value after `:` `[` `,` `{` or the line start, also as `\"` in escaped JSON.
   let before = open - 1
   if (text[before] === '\\') before--
@@ -166,8 +172,28 @@ function wholeSpans(text: string, pattern: RegExp, kind?: string): Span[] {
   return [...text.matchAll(pattern)].map(m => ({ start: m.index!, end: m.index! + m[0].length, kind }))
 }
 
+// A link id counts only when its link is the whole URL: the run of URL characters around it is parsed from its first scheme.
+function linkIdSpans(text: string): Span[] {
+  return wholeSpans(text, LINK_ID).filter(({ start, end }) => {
+    let from = start
+    while (from > 0 && start - from < MAX_VALUE_LENGTH && URL_CHAR.test(text[from - 1]!)) from--
+    if (from > 0 && URL_CHAR.test(text[from - 1]!)) return false
+    const scheme = SCHEME.exec(text.slice(from, start))
+    if (scheme === null) return false
+    let url: URL
+    try {
+      url = new URL(text.slice(from + scheme.index, end))
+    } catch {
+      return false
+    }
+    const id = text.slice(start, end)
+    if (url.hostname === 'claude.ai') return url.pathname === `/artifact/${id}` || url.pathname === `/code/artifact/${id}`
+    return /\.atlassian\.net$/.test(url.hostname) && url.searchParams.get('atlOrigin') === id
+  })
+}
+
 function withoutRandomIds(text: string, spans: Span[]): Span[] {
-  const ids = wholeSpans(text, RANDOM_ID)
+  const ids = [...wholeSpans(text, RANDOM_ID), ...linkIdSpans(text)]
   return spans.filter(s => !ids.some(id => s.start >= id.start && s.end <= id.end))
 }
 

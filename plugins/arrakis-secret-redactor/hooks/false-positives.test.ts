@@ -137,6 +137,46 @@ test('leaves a claude.ai or Jira link alone only when it starts its own URL', ()
   for (const text of hidden) expect({ text, found: secretSpans(text).length > 0 }).toEqual({ text, found: true })
 })
 
+test('parses the outer URL, so a link inside another URL is hidden also after an apostrophe', () => {
+  const id = RANDOM.slice(0, 22)
+  const first = ['‹SECRET', 't', '1›'].join('_')
+  const direct = [
+    `https://claude.ai/artifact/${id}`,
+    `https://claude.ai/code/artifact/0b6e4f0a-3c1d-4e2b-9f7a-5d8c2e1b4a90`,
+    `see it's here: https://claude.ai/artifact/${id}`,
+    `'https://claude.ai/artifact/${id}'`,
+    `https://${ATLASSIAN}/browse/PROJ-1?atlOrigin=eyJ${RANDOM}`,
+  ]
+  for (const text of direct) expect({ text, out: new Vault('t').mask(text).text }).toEqual({ text, out: text })
+  const outers = [
+    "https://evil.example/it's?next=",
+    "https://evil.example/r?q=a'b&next=",
+    "https://evil.example/o'neil/",
+    'https://evil.example/r?n=x|',
+    'https://evil.example\\',
+    'https://evil.example/ü?next=',
+    'https://evil.example/{x}?next=',
+  ]
+  for (const outer of outers) {
+    const text = `${outer}https://claude.ai/artifact/${id}`
+    expect({ text, out: new Vault('t').mask(text).text }).toEqual({ text, out: `${outer}https://claude.ai/artifact/${first}` })
+  }
+  const jira = `https://evil.example/it's?next=https://${ATLASSIAN}/browse/PROJ-1?atlOrigin=eyJ${RANDOM}`
+  expect(new Vault('t').mask(jira).text).not.toContain(RANDOM)
+})
+
+test('keeps later results readable after prose with an apostrophe before the URL', () => {
+  const lines = [
+    `{"msg":"It's at https://example.com","contact":"me@example.com"}`,
+    `{"msg":"It's at https://example.com","contact":"me:x@example.com"}`,
+  ]
+  for (const line of lines) {
+    const vault = new Vault('t')
+    expect({ line, count: vault.mask(line).count }).toEqual({ line, count: 1 })
+    expect({ line, later: vault.mask('{"message":"Not Found"}').text }).toEqual({ line, later: '{"message":"Not Found"}' })
+  }
+})
+
 test('still hides a random token that is not under an id key', () => {
   expect(secretSpans(`value: ${RANDOM}`)).toHaveLength(1)
 })
