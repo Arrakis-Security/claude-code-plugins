@@ -2,3 +2,6 @@
 plugins/*/.claude-plugin/types/
 .DS_Store
 node_modules/
+
+# Private patterns for .github/scripts/check-public-safe.sh
+.github/public-safe-patterns.local.txt
