@@ -177,6 +177,30 @@ test('keeps later results readable after prose with an apostrophe before the URL
   }
 })
 
+test('keeps later results readable after an escaped quote before the URL', () => {
+  const lines = [
+    String.raw`{"msg":"The guide says \"See also\" at https://example.com","contact":"me@example.com"}`,
+    String.raw`{\"msg\":\"The guide says \\\"See also\\\" at https://example.com\",\"contact\":\"me@example.com\"}`,
+    String.raw`{'msg':'It\'s at https://example.com','contact':'me@example.com'}`,
+    String.raw`[{"msg":"a \"b\" https://example.com"},{"contact":"me@example.com"}]`,
+    `'{"url":"https://example.com","contact":"me@example.com"}',`,
+  ]
+  for (const line of lines) {
+    const vault = new Vault('t')
+    expect({ line, count: vault.mask(line).count }).toEqual({ line, count: 1 })
+    expect({ line, later: vault.mask('{"message":"Not Found"}').text }).toEqual({ line, later: '{"message":"Not Found"}' })
+  }
+})
+
+test('scans many escaped quotes before a URL quickly', () => {
+  const password = ['ab', '12cd'].join('')
+  let text = ''
+  for (let k = 0; text.length < 200_000; k++) text += `${'\\'.repeat(k)}"x`
+  const started = Date.now()
+  secretSpans(text + ` s://a\\\\\\",:${password}@h`.repeat(2000))
+  expect(Date.now() - started).toBeLessThan(500)
+})
+
 test('still hides a random token that is not under an id key', () => {
   expect(secretSpans(`value: ${RANDOM}`)).toHaveLength(1)
 })

@@ -58,18 +58,30 @@ const URL_PASSWORD = new RegExp(String.raw`(:\/\/${URL_USER_NAME}:)([^\s@/]{${MI
 // The first quote in the user part that `,` `}` or `]` follows.
 const FIELD_END = /(["'`])\s*[,}\]]/
 
+const backslashesBefore = (text: string, at: number): number => {
+  let count = 0
+  while (text[at - count - 1] === '\\') count++
+  return count
+}
+// Before a quote each `\\` pair is a backslash in the value and the rest escape the quote, so `\"` and `\\\\\"` both close a value in escaped JSON.
+const quoteEscapes = (text: string, at: number): number => {
+  const count = backslashesBefore(text, at)
+  return (count ^ (count + 1)) >> 1
+}
+
 // A user part ran across fields of a JSON line or a dict only when it closes the string value the URL sits in.
 // A user name may hold `'` and `,`, so outside such a value the password keeps its usual replay.
-// The value is opened by the same quote that closes it, so a `'` in prose such as `It's` does not end the search.
+// The value is opened by the same quote, escaped as many times, as the one that closes it: `It's` in prose and `\"` inside a JSON value do not end the search.
 function crossesFields(text: string, at: number, lead: string): boolean {
-  const quote = FIELD_END.exec(lead)?.[1]
-  if (quote === undefined) return false
+  const close = FIELD_END.exec(lead)
+  if (close === null) return false
+  const quote = close[1]!
+  const escapes = quoteEscapes(text, at + close.index)
   let open = at - 1
-  while (open >= 0 && text[open] !== quote && text[open] !== '\n') open--
+  while (open >= 0 && text[open] !== '\n' && (text[open] !== quote || quoteEscapes(text, open) !== escapes)) open--
   if (open < 0 || text[open] === '\n') return false
-  // A quote opens a value after `:` `[` `,` `{` or the line start, also as `\"` in escaped JSON.
-  let before = open - 1
-  if (text[before] === '\\') before--
+  // A quote opens a value after `:` `[` `,` `{` or the line start.
+  let before = open - backslashesBefore(text, open) - 1
   while (before >= 0 && (text[before] === ' ' || text[before] === '\t')) before--
   return before < 0 || ':[,{\n'.includes(text[before]!)
 }
