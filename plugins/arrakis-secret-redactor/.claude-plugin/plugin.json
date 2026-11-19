@@ -1,6 +1,6 @@
 {
   "name": "arrakis-secret-redactor",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "Hides secrets from Claude: replaces them in tool results with placeholders, and writes real values back only into git-ignored files",
   "author": { "name": "Arrakis", "url": "https://github.com/Arrakis-Security" },
   "homepage": "https://github.com/Arrakis-Security/claude-code-plugins",

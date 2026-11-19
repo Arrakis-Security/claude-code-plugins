@@ -38,7 +38,7 @@ const WEBP = encoded('RIFF\x10\x27\x00\x00WEBPVP8 ')
 const PDF = encoded('%PDF-1.7\n')
 
 function run(value: unknown): { result: unknown; count: number } {
-  const tally = { count: 0 }
+  const tally = { count: 0, found: new Set<string>() }
   return { result: maskDeep(value, new Vault('t'), tally), count: tally.count }
 }
 

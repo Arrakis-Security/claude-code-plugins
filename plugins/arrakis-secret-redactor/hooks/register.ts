@@ -1,6 +1,6 @@
 import type { EngineInterface as Engine, Register } from 'claude-code'
 
-import { Vault, maskDeep, placeholdersIn } from './vault'
+import { type Tally, Vault, maskDeep, placeholdersIn } from './vault'
 
 const NAME = 'Arrakis Secret Redactor'
 const HOMEPAGE = 'https://github.com/Arrakis-Security/claude-code-plugins'
@@ -44,6 +44,15 @@ async function isGitIgnored($: Engine, path: string): Promise<boolean> {
 // Claude Code shows the plugin's name in front of its status line, so the text leaves the name out.
 export function countLine(count: number): string {
   return `🛡️ ${count} secret${count === 1 ? '' : 's'} hidden from Claude this session`
+}
+
+const MAX_NAMED_IN_NOTICE = 3
+
+function hiddenNotice(count: number, labels: Set<string>, tool: string): string {
+  const kinds = [...labels]
+  const named = kinds.slice(0, MAX_NAMED_IN_NOTICE).join(', ')
+  const more = kinds.length > MAX_NAMED_IN_NOTICE ? ` +${kinds.length - MAX_NAMED_IN_NOTICE} more` : ''
+  return `${NAME}: hid ${count} secret(s) from ${tool}: ${named}${more}`
 }
 
 export function introduced(newText: string, oldText: string): string[] {
@@ -112,7 +121,7 @@ export const register: Register = on => {
     // A skill's instructions ride in the messages `ref` names; any rebuilt result would drop them.
     if (e.tool === 'Skill') return ran
 
-    const tally = { count: 0 }
+    const tally: Tally = { count: 0, found: new Set() }
     // A failed call's result is bare text that no rebuilt result passes validation as; its masked text goes back as the refusal.
     if (ran.isError) return { deny: vault.mask(String(ran.text ?? ran.result ?? '')).text }
 
@@ -121,7 +130,7 @@ export const register: Register = on => {
     // Nothing masked: return core's own answer, whose `ref` carries the messages core made, such as a skill's instructions.
     if (tally.count === 0) return ran
     maskedThisSession += tally.count
-    $.ui.toast(`${NAME}: hid ${tally.count} secret(s) from ${e.tool}`)
+    $.ui.toast(hiddenNotice(tally.count, vault.labelsOf(tally.found), e.tool))
     $.ui.status(countLine(maskedThisSession))
     // A fresh object without `ref`: core would otherwise reuse the unmasked messages it produced.
     return { result, context, isError: ran.isError } as typeof ran
