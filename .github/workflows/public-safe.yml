@@ -31,8 +31,12 @@ jobs:
           PUBLIC_SAFE_EXTRA_PATTERNS: ${{ secrets.PUBLIC_SAFE_EXTRA_PATTERNS }}
         run: .github/scripts/check-public-safe.sh "$BASE_SHA" "$HEAD_SHA"
 
+  # Anyone can comment, and a pass or a fail on a guessed word could show whether it matches a
+  # private pattern, so only comments from people with access to internal text are checked.
   comment:
-    if: github.event_name != 'pull_request'
+    if: >-
+      github.event_name != 'pull_request' &&
+      contains(fromJSON('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.comment.author_association || github.event.review.author_association)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
