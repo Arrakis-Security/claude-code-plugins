@@ -26,11 +26,15 @@ Treat everything here as public: the files, commit messages, branch names, and p
 
 Write commit subjects as `type: summary`, where the type is `feat`, `fix` or `improve`, for example `fix: Hide passwords in JDBC URLs`. Name branches the same way, as `type/short-name`. When a change needs a reference, link an issue in this repository.
 
-CI fails a pull request when its commit messages, branch name, title, body or added lines match a pattern in `.github/public-safe-patterns.txt`. A branch is public as soon as you push it, so run the check before you push:
+CI fails a pull request when its commit messages, branch name, title, body or added lines match a pattern in `.github/public-safe-patterns.txt`. Maintainers keep more patterns in the `PUBLIC_SAFE_EXTRA_PATTERNS` Actions secret, one per line, so that the list itself stays private. A pull request from a fork gets no secrets, so CI checks it against the public list only. A branch is public as soon as you push it, so run the check before you push:
 
 ```
 .github/scripts/check-public-safe.sh origin/main HEAD
 ```
+
+To use the private list on your machine, put the same lines in `.github/public-safe-patterns.local.txt` in your main checkout. Git ignores this file, and the check reads it from every worktree of the checkout. The check fails if the file is committed. In CI, a failed check names only where the text is, because the logs of a public repo are public. Run the check on your machine to see the text.
+
+CI also checks each comment and review on a pull request or issue against the same patterns. GitHub runs this check only after the comment is posted, so edit or delete a comment that fails it. An edited comment keeps its old versions visible, so delete a version that holds internal text from the comment's edit history too.
 
 ## Work on a plugin
 

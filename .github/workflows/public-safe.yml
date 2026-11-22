@@ -3,12 +3,19 @@ name: Public safe
 on:
   pull_request:
     types: [opened, synchronize, reopened, edited]
+  issue_comment:
+    types: [created, edited]
+  pull_request_review:
+    types: [submitted, edited]
+  pull_request_review_comment:
+    types: [created, edited]
 
 permissions:
   contents: read
 
 jobs:
   public-safe:
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -21,4 +28,20 @@ jobs:
           HEAD_REF: ${{ github.head_ref }}
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PUBLIC_SAFE_EXTRA_PATTERNS: ${{ secrets.PUBLIC_SAFE_EXTRA_PATTERNS }}
         run: .github/scripts/check-public-safe.sh "$BASE_SHA" "$HEAD_SHA"
+
+  # Anyone can comment, and a pass or a fail on a guessed word could show whether it matches a
+  # private pattern, so only comments from people with access to internal text are checked.
+  comment:
+    if: >-
+      github.event_name != 'pull_request' &&
+      contains(fromJSON('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.comment.author_association || github.event.review.author_association)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Check nothing internal is in the comment
+        env:
+          COMMENT_BODY: ${{ github.event.comment.body || github.event.review.body }}
+          PUBLIC_SAFE_EXTRA_PATTERNS: ${{ secrets.PUBLIC_SAFE_EXTRA_PATTERNS }}
+        run: .github/scripts/check-public-safe.sh
