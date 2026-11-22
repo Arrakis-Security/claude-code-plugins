@@ -243,3 +243,38 @@ test('hides a URL password with a digit or symbol everywhere it appears later', 
   expect(vault.mask(`postgres://app:${WORD_PASSWORD}@db:5432/app`).text).not.toContain(WORD_PASSWORD)
   expect(vault.mask(`login failed for ${WORD_PASSWORD}`).text).not.toContain(WORD_PASSWORD)
 })
+
+test('leaves a template, a ternary and a shell message under a secret name readable', () => {
+  const safe = [
+    'password: "${{ secrets.DB_PASSWORD }}"',
+    'password: "{{ .Values.db.password }}"',
+    `password: "<%= ENV['DB_PASSWORD'] %>"`,
+    'PASSWORD="$(cat /run/secrets/pw)"',
+    'secret_id = "${local.slug}/app/shared"',
+    "showPassword ? 'Hide password' : 'Show password'",
+    'TOKEN="${SLACK_INFRA_PROD_NOTIFICATIONS_TOKEN:-}"',
+    'echo "${DB_PASSWORD:?DB_PASSWORD must be set}"',
+    'PASSWORD="${DB_PASSWORD:?must be set}"',
+  ]
+  for (const text of safe) expect({ text, spans: secretSpans(text) }).toEqual({ text, spans: [] })
+})
+
+test('still hides a real value next to a template, a quoted key or a shell default', () => {
+  const hidden = [
+    `X="\${DB_PASSWORD:-${WORD_PASSWORD}}"`,
+    `PASSWORD="\${A}\${DB_PASSWORD:-${WORD_PASSWORD}}"`,
+    `{"db_password": "${WORD_PASSWORD}"}`,
+    `{'my-password' : '${WORD_PASSWORD}'}`,
+    `{"spring.datasource.password": "${WORD_PASSWORD}"}`,
+    `{"Admin Password": "${WORD_PASSWORD}"}`,
+    `ok ? x : {"password": "${WORD_PASSWORD}"}`,
+    `Is this right? "password": "${WORD_PASSWORD}"`,
+    `password: "{{x}};${WORD_PASSWORD}"`,
+    `password: "$(echo '${WORD_PASSWORD}')"`,
+    `password: '{{ .Values.x | default "${WORD_PASSWORD}" }}'`,
+    `password: "{{x}} ${WORD_PASSWORD}"`,
+    `DB_PASSWORD=+${WORD_PASSWORD}`,
+    `DB_PASSWORD: ?${WORD_PASSWORD}`,
+  ]
+  for (const text of hidden) expect({ text, leaks: new Vault().mask(text).text.includes(WORD_PASSWORD) }).toEqual({ text, leaks: false })
+})

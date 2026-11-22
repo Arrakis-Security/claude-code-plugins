@@ -205,3 +205,9 @@ test('names three hidden secrets and counts the rest', async ($, on) => {
 
   expect(toasts).toEqual(['Arrakis Secret Redactor: hid 4 secret(s) from Bash: DB_PASSWORD, APP_SECRET, API_TOKEN +1 more'])
 })
+
+test('names a secret by its name when only a short value in the vault is inside that name', () => {
+  const vault = new Vault('t')
+  vault.mask('redis://u:key@h')
+  expect(vault.mask(`api_key=${['Zx9qL', 'm2Vt8', 'RkW4p', 'Yb7Nc'].join('')}`).hidden).toEqual(new Set([`api_key …Yb7Nc`.replace('Yb7Nc', 'b7Nc')]))
+})

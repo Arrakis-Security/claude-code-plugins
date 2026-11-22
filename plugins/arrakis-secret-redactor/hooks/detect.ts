@@ -30,10 +30,12 @@ export const RULE_KINDS: ReadonlySet<string> = new Set([...VENDOR_SHAPES.map(([k
 
 const SECRET_NAMES = String.raw`[A-Za-z0-9_]{0,64}(?:secret|password|passwd|pwd|token|api[_-]?key|private[_-]?key|access[_-]?key|credential)[A-Za-z0-9_]{0,64}`
 const MIN_NAMED_VALUE = 6
+// In a ternary such as `ok ? 'Hide password' : 'Show password'` the quote after the name ends a string of words, so it is no key; `? "password":` still is.
+const NAME_KEY = String.raw`(?:\b${SECRET_NAMES}(?:(?<!\?\s{0,8}["'][^"'\n]{0,64}\s[^"'\n]{0,64})["'])?)`
 const MIN_URL_PASSWORD = 3
 
 // The secret is group 2: `DB_PASSWORD=hunter22`, `"clientSecret": "abc"`, `api_key: abc`.
-const NAMED_VALUE = new RegExp(String.raw`(\b${SECRET_NAMES}["']?\s*[=:]\s*["']?)((?:(?<!\s)|(?!#))[^\s"'\`,;]{${MIN_NAMED_VALUE},})`, 'gi')
+const NAMED_VALUE = new RegExp(String.raw`(${NAME_KEY}\s*[=:]\s*["']?)((?:(?<!\s)|(?!#))[^\s"'\`,;]{${MIN_NAMED_VALUE},})`, 'gi')
 
 // A type, a literal or a pointer to where the value lives is not the value: `credentialsValid: boolean`, `key = process.env.KEY`.
 const TYPE_WORDS = 'boolean|string|number|bigint|object|unknown|any|void|never|null|undefined|true|false'
@@ -94,7 +96,7 @@ const MAX_VALUE_LENGTH = 4096
 // After its closing quote a value ends at `,` `;` `)` `}` `]`, a `#` comment, or the end of the line.
 const VALUE_END = String.raw`(?=\s*(?:[,;)}\]#]|$))`
 const QUOTED_NAMED_VALUE = new RegExp(
-  String.raw`(\b${SECRET_NAMES}["']?\s*[=:]\s*)(?:"""([^\n]{${MIN_NAMED_VALUE},${MAX_VALUE_LENGTH}}?)"""|'''([^\n]{${MIN_NAMED_VALUE},${MAX_VALUE_LENGTH}}?)'''|"((?:\\.|[^"\\\n]){${MIN_NAMED_VALUE},${MAX_VALUE_LENGTH}})"|'((?:\\'|[^'\n]){${MIN_NAMED_VALUE},${MAX_VALUE_LENGTH}})')${VALUE_END}`,
+  String.raw`(${NAME_KEY}\s*[=:]\s*)(?:"""([^\n]{${MIN_NAMED_VALUE},${MAX_VALUE_LENGTH}}?)"""|'''([^\n]{${MIN_NAMED_VALUE},${MAX_VALUE_LENGTH}}?)'''|"((?:\\.|[^"\\\n]){${MIN_NAMED_VALUE},${MAX_VALUE_LENGTH}})"|'((?:\\'|[^'\n]){${MIN_NAMED_VALUE},${MAX_VALUE_LENGTH}})')${VALUE_END}`,
   'gimd',
 )
 // Inside escaped JSON each character arrives escaped once more: `\\\"` is a quote inside the value and `\"` closes it.
@@ -105,7 +107,20 @@ const ESCAPED_JSON_NAMED_VALUE = new RegExp(
 // Text between two string literals is code, not a value: `"token: " + token + ", expires: "`, or ` . $token . ` in PHP.
 const CONCATENATED = /^\s+(?:\+|\.\.?|\|\|)\s|\s(?:\+|\.\.?|\|\|)\s+$/
 // In `"${DB_PASS:-default}"` only the default is a literal, so it alone is the value.
-const SHELL_DEFAULT = /^(\$\{[A-Za-z_][A-Za-z0-9_]*:?[-=?+])(.+)\}$/
+const SHELL_DEFAULT = /^(\$\{[A-Za-z_][A-Za-z0-9_]*:?([-=?+]))(.*)\}$/
+// After `:?` comes an error message, not a default.
+const SHELL_NOT_DEFAULT = /\$\{[A-Za-z_][A-Za-z0-9_]*:$/
+// A template fills the value in later: `"${{ secrets.X }}"`, `"{{ .Values.x }}"`, `"<%= ENV['X'] %>"`, `"$(cat /run/secrets/x)"`, `"${local.slug}/app"`.
+const TEMPLATE_PIECE = /\$\{\{[^}\n]*\}\}|\{\{[^}\n]*\}\}|<%[^%\n]*%>|\$\([^)\n]*\)|\$\{[A-Za-z_][\w.]*\}/g
+const SHELL_WITH_DEFAULT = /\$\{[A-Za-z_][A-Za-z0-9_]*:?[-=]/
+// Only a path or a suffix sits between template pieces, and a quoted text inside a piece names a variable, as in `ENV['DB_PASSWORD']`.
+const TEMPLATE_LEFTOVER = /^[\w./:@-]*$/
+const QUOTED_IN_PIECE = /(["'])(.*?)\1/g
+const isTemplate = (value: string): boolean => {
+  const pieces = value.match(TEMPLATE_PIECE)
+  if (pieces === null || SHELL_WITH_DEFAULT.test(value) || !TEMPLATE_LEFTOVER.test(value.replace(TEMPLATE_PIECE, ''))) return false
+  return pieces.every(piece => [...piece.matchAll(QUOTED_IN_PIECE)].every(([, , inner]) => /^[A-Z_][A-Z0-9_]*$/.test(inner!)))
+}
 const URL_USER = new RegExp(String.raw`:\/\/${URL_USER_NAME}:`, 'gi')
 // The authority ends at "/", whitespace, a double quote or backtick, a single quote before `,` `}` `]` or `)`, or the next "://".
 const AUTHORITY_END = /[/\s"`]|'[,}\])]|:\/\//y
@@ -254,8 +269,10 @@ function quotedValueSpans(text: string, pattern: RegExp): Span[] {
     const group = m.findIndex((g, i) => i >= 2 && g !== undefined)
     const value = m[group]!
     if (NOT_A_QUOTED_SECRET.test(value) || CONCATENATED.test(value)) return []
+    if (isTemplate(value)) return []
     const [start, end] = m.indices![group]!
     const shell = SHELL_DEFAULT.exec(value)
+    if (shell && (shell[3] === '' || shell[2] === '?')) return []
     const kind = nameIn(m[1]!)
     return [shell ? { start: start + shell[1]!.length, end: end - 1, named: true, kind } : { start, end, named: true, kind }]
   })
@@ -286,7 +303,7 @@ function urlAuthoritySpans(text: string): Span[] {
 export function secretSpans(text: string): Span[] {
   return union([
     ...VENDOR_SHAPES.flatMap(([kind, p]) => wholeSpans(text, p, kind)),
-    ...groupSpans(text, NAMED_VALUE, nameIn, () => true).filter(s => !NOT_A_SECRET_VALUE.test(text.slice(s.start, s.end)) && !isRegexLiteral(text, s.start)).flatMap(s => withPartBeforeHash(text, s)),
+    ...groupSpans(text, NAMED_VALUE, nameIn, () => true).filter(s => !NOT_A_SECRET_VALUE.test(text.slice(s.start, s.end)) && !isRegexLiteral(text, s.start) && !(text[s.start] === '?' && SHELL_NOT_DEFAULT.test(text.slice(Math.max(0, s.start - 200), s.start)))).flatMap(s => withPartBeforeHash(text, s)),
     // A letters-only URL password is a word like "postgres", and one after fields of a JSON line is the start of the next value: both stay hidden only where the rule finds them.
     ...groupSpans(text, URL_PASSWORD, () => URL_PASSWORD_KIND, (value, lead, at) => isPlainWord(value) || crossesFields(text, at, lead)),
     ...groupSpans(text, BEARER, () => BEARER_KIND),

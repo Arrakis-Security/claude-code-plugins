@@ -58,12 +58,12 @@ export class Vault {
     return this.byPlaceholder.has(placeholder)
   }
 
-  // A name read from the text can hold any value the vault hid in another line, replayed or not, so it is checked when shown.
+  // A name read from the text can hold a value the vault hid in another line, so it is checked when shown; a value shorter than a replayed one would match ordinary names.
   private labelOf(value: string): string {
     const label = this.labels.get(value)!
     const name = label.split(PREVIEW_SEPARATOR)[0]!
     if (RULE_KINDS.has(name)) return label
-    for (const known of this.byValue.keys()) if (name.includes(known)) return 'secret'
+    for (const known of this.byValue.keys()) if (known.length >= MIN_REPLAYED_LENGTH && name.includes(known)) return 'secret'
     return label
   }
 
