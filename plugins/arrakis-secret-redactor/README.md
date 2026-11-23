@@ -65,7 +65,7 @@ Git commit hashes, UUIDs (universally unique IDs), file paths, package integrity
 
 ## Limits
 
-- **Detection is pattern-based.** A secret in a format the rules don't know can get through, and a random-looking value that isn't a secret can be hidden.
+- **It misses some secrets.** Detection is pattern-based, so the plugin hides only the shapes listed under "What it detects". A password in another shape reaches Claude, such as the default in an unquoted `PASSWORD=${A:?unset}${B:-<password>}`. A random-looking value that isn't a secret can be hidden.
 - **It covers tool results only.** A secret you type or paste into the prompt reaches Claude.
 - **A skill's text is not checked.** A skill can run a shell command while it loads, and that command's output reaches Claude as the skill returned it.
 - **Images and PDFs reach Claude unchanged.** The plugin checks text only, so a secret shown in a screenshot, written in a PDF or stored in the file's metadata reaches Claude.

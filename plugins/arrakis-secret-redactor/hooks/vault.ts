@@ -47,7 +47,9 @@ export class Vault {
       placeholder = `‹SECRET_${this.tag}_${this.byValue.size + 1}›`
       this.byValue.set(value, placeholder)
       this.byPlaceholder.set(placeholder, value)
-      this.labels.set(value, describe(kind, value))
+      // A line of a private key seen alone, as from a service-account JSON that joins the lines with `\n`, keeps the key's label.
+      const keyPiece = [...this.labels].some(([known, label]) => label === PRIVATE_KEY && known.includes(value))
+      this.labels.set(value, describe(keyPiece ? PRIVATE_KEY : kind, value))
     } else if (kind === PRIVATE_KEY || (kind !== undefined && kind !== RANDOM_TOKEN && this.labels.get(value)!.startsWith(RANDOM_TOKEN))) {
       this.labels.set(value, describe(kind, value))
     }

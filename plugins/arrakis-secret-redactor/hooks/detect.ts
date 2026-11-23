@@ -30,8 +30,7 @@ export const RULE_KINDS: ReadonlySet<string> = new Set([...VENDOR_SHAPES.map(([k
 
 const SECRET_NAMES = String.raw`[A-Za-z0-9_]{0,64}(?:secret|password|passwd|pwd|token|api[_-]?key|private[_-]?key|access[_-]?key|credential)[A-Za-z0-9_]{0,64}`
 const MIN_NAMED_VALUE = 6
-// In a ternary such as `ok ? 'Hide password' : 'Show password'` the quote after the name ends a string of words, so it is no key; `? "password":` still is.
-const NAME_KEY = String.raw`(?:\b${SECRET_NAMES}(?:(?<!\?\s{0,8}["'][^"'\n]{0,64}\s[^"'\n]{0,64})["'])?)`
+const NAME_KEY = String.raw`(?:\b${SECRET_NAMES}["']?)`
 const MIN_URL_PASSWORD = 3
 
 // The secret is group 2: `DB_PASSWORD=hunter22`, `"clientSecret": "abc"`, `api_key: abc`.
@@ -107,14 +106,14 @@ const ESCAPED_JSON_NAMED_VALUE = new RegExp(
 // Text between two string literals is code, not a value: `"token: " + token + ", expires: "`, or ` . $token . ` in PHP.
 const CONCATENATED = /^\s+(?:\+|\.\.?|\|\|)\s|\s(?:\+|\.\.?|\|\|)\s+$/
 // In `"${DB_PASS:-default}"` only the default is a literal, so it alone is the value.
-const SHELL_DEFAULT = /^(\$\{[A-Za-z_][A-Za-z0-9_]*:?([-=?+]))(.*)\}$/
+const SHELL_DEFAULT = /^(\$\{[A-Za-z_][A-Za-z0-9_]*:?([-=?+]))([^}]*)\}$/
 // After `:?` comes an error message, not a default.
 const SHELL_NOT_DEFAULT = /\$\{[A-Za-z_][A-Za-z0-9_]*:$/
-// A template fills the value in later: `"${{ secrets.X }}"`, `"{{ .Values.x }}"`, `"<%= ENV['X'] %>"`, `"$(cat /run/secrets/x)"`, `"${local.slug}/app"`.
-const TEMPLATE_PIECE = /\$\{\{[^}\n]*\}\}|\{\{[^}\n]*\}\}|<%[^%\n]*%>|\$\([^)\n]*\)|\$\{[A-Za-z_][\w.]*\}/g
+// A template fills the value in later: `"${{ secrets.X }}"`, `"{{ .Values.x }}"`, `"<%= ENV['X'] %>"`, `"#{ENV['X']}"`, `"${env:X}"`, `"$(cat /run/secrets/x)"`, `"${local.slug}/app"`. A command counts only when its arguments are paths, variables or flags.
+const TEMPLATE_PIECE = /\$\{\{[^}\n]*\}\}|\{\{[^}\n]*\}\}|<%[^%\n]*%>|\$\([\w.-]+(?:\s+(?:[\w.-]*\/[\w./-]*|\$\w+|-\w+))*\)|\$\{[A-Za-z_][\w.]*\}|#\{[^}\n]*\}|\$\{[a-z]+:[^-=?+}\n][^}\n]*\}/g
 const SHELL_WITH_DEFAULT = /\$\{[A-Za-z_][A-Za-z0-9_]*:?[-=]/
-// Only a path or a suffix sits between template pieces, and a quoted text inside a piece names a variable, as in `ENV['DB_PASSWORD']`.
-const TEMPLATE_LEFTOVER = /^[\w./:@-]*$/
+// Only a path that starts with `/` may follow the pieces, and a quoted text inside a piece names a variable, as in `ENV['DB_PASSWORD']`.
+const TEMPLATE_LEFTOVER = /^(?:\/[\w./:@-]*)?$/
 const QUOTED_IN_PIECE = /(["'])(.*?)\1/g
 const isTemplate = (value: string): boolean => {
   const pieces = value.match(TEMPLATE_PIECE)

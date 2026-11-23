@@ -244,17 +244,19 @@ test('hides a URL password with a digit or symbol everywhere it appears later', 
   expect(vault.mask(`login failed for ${WORD_PASSWORD}`).text).not.toContain(WORD_PASSWORD)
 })
 
-test('leaves a template, a ternary and a shell message under a secret name readable', () => {
+test('leaves a template and a shell message under a secret name readable', () => {
   const safe = [
     'password: "${{ secrets.DB_PASSWORD }}"',
     'password: "{{ .Values.db.password }}"',
     `password: "<%= ENV['DB_PASSWORD'] %>"`,
     'PASSWORD="$(cat /run/secrets/pw)"',
     'secret_id = "${local.slug}/app/shared"',
-    "showPassword ? 'Hide password' : 'Show password'",
     'TOKEN="${SLACK_INFRA_PROD_NOTIFICATIONS_TOKEN:-}"',
     'echo "${DB_PASSWORD:?DB_PASSWORD must be set}"',
     'PASSWORD="${DB_PASSWORD:?must be set}"',
+    `password: "#{ENV['DB_PASSWORD']}"`,
+    'password: "${env:DB_PASSWORD}"',
+    'password: "${ssm:/app/db-password}"',
   ]
   for (const text of safe) expect({ text, spans: secretSpans(text) }).toEqual({ text, spans: [] })
 })
@@ -269,6 +271,15 @@ test('still hides a real value next to a template, a quoted key or a shell defau
     `{"Admin Password": "${WORD_PASSWORD}"}`,
     `ok ? x : {"password": "${WORD_PASSWORD}"}`,
     `Is this right? "password": "${WORD_PASSWORD}"`,
+    `Ready? "Admin Password": "${WORD_PASSWORD}"`,
+    `Ok? 'db password' : '${WORD_PASSWORD}'`,
+    `PASSWORD="\${HOST}${WORD_PASSWORD}"`,
+    `PASSWORD="$(cat /run/s)${WORD_PASSWORD}"`,
+    `PASSWORD="$(htpasswd -nbB admin ${WORD_PASSWORD})"`,
+    `PASSWORD="$(echo ${WORD_PASSWORD} | base64)"`,
+    `PASSWORD="\${{ secrets.USER }}:${WORD_PASSWORD}@db"`,
+    `PASSWORD="\${X:+--password=${WORD_PASSWORD}}"`,
+    `PASSWORD="\${A:?missing} \${B:-${WORD_PASSWORD}}"`,
     `password: "{{x}};${WORD_PASSWORD}"`,
     `password: "$(echo '${WORD_PASSWORD}')"`,
     `password: '{{ .Values.x | default "${WORD_PASSWORD}" }}'`,

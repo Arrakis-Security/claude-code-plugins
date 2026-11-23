@@ -166,6 +166,13 @@ test('shows no characters of a private key line seen again on its own', () => {
   expect(vault.mask(`found ${LONG}`).hidden).toEqual(new Set(['private key']))
 })
 
+test('shows no characters of a private key line seen alone after a service-account JSON', () => {
+  const pem = ['-----BEGIN ', 'PRIVATE KEY-----\\n', LONG, '\\n', SHORT, LONG.slice(0, 10), '\\n-----END ', 'PRIVATE KEY-----\\n'].join('')
+  const vault = new Vault('t')
+  vault.mask(`{"type": "service_account", "private_key": "${pem}"}`)
+  expect(vault.mask(`found ${LONG}`).hidden).toEqual(new Set(['private key']))
+})
+
 test('never names a secret by a name that is itself a secret, and keeps the hyphens in a name', () => {
   const token = ['gh', 'p_'].join('') + ['Zx9qL', 'm2Token', 'RkW4p', 'Yb7Nc', 'J3sHd'].join('')
   const remote = new Vault('t').mask(`origin\thttps://${token}:x-oauth-basic@github.com/acme/app.git (fetch)`)
