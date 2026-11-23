@@ -261,10 +261,12 @@ test('leaves a template and a shell message under a secret name readable', () =>
   for (const text of safe) expect({ text, spans: secretSpans(text) }).toEqual({ text, spans: [] })
 })
 
+// Built at run time, so CodeQL reads no escaped `$` in these strings.
+const DOLLAR = '$'
 test('still hides a real value next to a template, a quoted key or a shell default', () => {
   const hidden = [
-    `X="\${DB_PASSWORD:-${WORD_PASSWORD}}"`,
-    `PASSWORD="\${A}\${DB_PASSWORD:-${WORD_PASSWORD}}"`,
+    `X="${DOLLAR}{DB_PASSWORD:-${WORD_PASSWORD}}"`,
+    `PASSWORD="${DOLLAR}{A}${DOLLAR}{DB_PASSWORD:-${WORD_PASSWORD}}"`,
     `{"db_password": "${WORD_PASSWORD}"}`,
     `{'my-password' : '${WORD_PASSWORD}'}`,
     `{"spring.datasource.password": "${WORD_PASSWORD}"}`,
@@ -273,14 +275,17 @@ test('still hides a real value next to a template, a quoted key or a shell defau
     `Is this right? "password": "${WORD_PASSWORD}"`,
     `Ready? "Admin Password": "${WORD_PASSWORD}"`,
     `Ok? 'db password' : '${WORD_PASSWORD}'`,
-    `PASSWORD="\${HOST}${WORD_PASSWORD}"`,
+    `PASSWORD="${DOLLAR}{HOST}${WORD_PASSWORD}"`,
     `PASSWORD="$(cat /run/s)${WORD_PASSWORD}"`,
     `PASSWORD="$(htpasswd -nbB admin ${WORD_PASSWORD})"`,
     `PASSWORD="$(echo ${WORD_PASSWORD} | base64)"`,
-    `PASSWORD="\${{ secrets.USER }}:${WORD_PASSWORD}@db"`,
-    `PASSWORD="\${X:+--password=${WORD_PASSWORD}}"`,
-    `PASSWORD="\${env:DB_PASSWORD, ${WORD_PASSWORD}}"`,
-    `PASSWORD="\${A:?missing} \${B:-${WORD_PASSWORD}}"`,
+    `PASSWORD="${DOLLAR}{{ secrets.USER }}:${WORD_PASSWORD}@db"`,
+    `PASSWORD="${DOLLAR}{X:+--password=${WORD_PASSWORD}}"`,
+    `PASSWORD="${DOLLAR}{env:DB_PASSWORD, ${WORD_PASSWORD}}"`,
+    `PASSWORD="${DOLLAR}{env:DB_PASSWORD ${WORD_PASSWORD}}"`,
+    `PASSWORD="${DOLLAR}{env:DB_PASSWORD;${WORD_PASSWORD}}"`,
+    `PASSWORD="${DOLLAR}{env:DB_PASSWORD|${WORD_PASSWORD}}"`,
+    `PASSWORD="${DOLLAR}{A:?missing} ${DOLLAR}{B:-${WORD_PASSWORD}}"`,
     `password: "{{x}};${WORD_PASSWORD}"`,
     `password: "$(echo '${WORD_PASSWORD}')"`,
     `password: '{{ .Values.x | default "${WORD_PASSWORD}" }}'`,
