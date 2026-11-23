@@ -279,6 +279,7 @@ test('still hides a real value next to a template, a quoted key or a shell defau
     `PASSWORD="$(echo ${WORD_PASSWORD} | base64)"`,
     `PASSWORD="\${{ secrets.USER }}:${WORD_PASSWORD}@db"`,
     `PASSWORD="\${X:+--password=${WORD_PASSWORD}}"`,
+    `PASSWORD="\${env:DB_PASSWORD, ${WORD_PASSWORD}}"`,
     `PASSWORD="\${A:?missing} \${B:-${WORD_PASSWORD}}"`,
     `password: "{{x}};${WORD_PASSWORD}"`,
     `password: "$(echo '${WORD_PASSWORD}')"`,

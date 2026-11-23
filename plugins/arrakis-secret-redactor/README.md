@@ -65,7 +65,6 @@ Git commit hashes, UUIDs (universally unique IDs), file paths, package integrity
 
 ## Limits
 
-- **It misses some secrets.** Detection is pattern-based, so the plugin hides only the shapes listed under "What it detects". A password in another shape reaches Claude, such as the default in an unquoted `PASSWORD=${A:?unset}${B:-<password>}`. A random-looking value that isn't a secret can be hidden.
 - **It covers tool results only.** A secret you type or paste into the prompt reaches Claude.
 - **A skill's text is not checked.** A skill can run a shell command while it loads, and that command's output reaches Claude as the skill returned it.
 - **Images and PDFs reach Claude unchanged.** The plugin checks text only, so a secret shown in a screenshot, written in a PDF or stored in the file's metadata reaches Claude.
@@ -76,6 +75,7 @@ Git commit hashes, UUIDs (universally unique IDs), file paths, package integrity
 - **The write check follows symbolic links, not hard links.** A git-ignored file that is a hard link to a tracked file counts as ignored.
 - **It hides values from Claude. Your programs can still read them.** A git-ignored file that Claude filled in can still be run or sent over the network.
 - **OpenTelemetry (a standard for tracing app activity) traces see tool output first.** When Claude Code exports OpenTelemetry traces, the `claude_code.tool` span can hold a tool's output as the tool returned it, before this plugin hides anything.
+- **Detection is pattern-based.** The plugin hides the shapes listed under "What it detects". The patterns may not cover every way to write a secret, so a secret in a shape they don't cover can reach Claude. A random-looking value that isn't a secret can be hidden.
 
 ## Where it runs
 

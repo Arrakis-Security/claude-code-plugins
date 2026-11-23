@@ -110,7 +110,7 @@ const SHELL_DEFAULT = /^(\$\{[A-Za-z_][A-Za-z0-9_]*:?([-=?+]))([^}]*)\}$/
 // After `:?` comes an error message, not a default.
 const SHELL_NOT_DEFAULT = /\$\{[A-Za-z_][A-Za-z0-9_]*:$/
 // A template fills the value in later: `"${{ secrets.X }}"`, `"{{ .Values.x }}"`, `"<%= ENV['X'] %>"`, `"#{ENV['X']}"`, `"${env:X}"`, `"$(cat /run/secrets/x)"`, `"${local.slug}/app"`. A command counts only when its arguments are paths, variables or flags.
-const TEMPLATE_PIECE = /\$\{\{[^}\n]*\}\}|\{\{[^}\n]*\}\}|<%[^%\n]*%>|\$\([\w.-]+(?:\s+(?:[\w.-]*\/[\w./-]*|\$\w+|-\w+))*\)|\$\{[A-Za-z_][\w.]*\}|#\{[^}\n]*\}|\$\{[a-z]+:[^-=?+}\n][^}\n]*\}/g
+const TEMPLATE_PIECE = /\$\{\{[^}\n]*\}\}|\{\{[^}\n]*\}\}|<%[^%\n]*%>|\$\([\w.-]+(?:\s+(?:[\w.-]*\/[\w./-]*|\$\w+|-\w+))*\)|\$\{[A-Za-z_][\w.]*\}|#\{[^}\n]*\}|\$\{[a-z]+:[^-=?+},\n][^},\n]*\}/g
 const SHELL_WITH_DEFAULT = /\$\{[A-Za-z_][A-Za-z0-9_]*:?[-=]/
 // Only a path that starts with `/` may follow the pieces, and a quoted text inside a piece names a variable, as in `ENV['DB_PASSWORD']`.
 const TEMPLATE_LEFTOVER = /^(?:\/[\w./:@-]*)?$/
