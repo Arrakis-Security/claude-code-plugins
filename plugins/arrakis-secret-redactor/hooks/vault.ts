@@ -50,6 +50,8 @@ export class Vault {
       // A line of a private key seen alone, as from a service-account JSON that joins the lines with `\n`, keeps the key's label.
       const keyPiece = [...this.labels].some(([known, label]) => label === PRIVATE_KEY && known.includes(value))
       this.labels.set(value, describe(keyPiece ? PRIVATE_KEY : kind, value))
+      // A line of the key seen before the whole key loses the characters its first label showed.
+      if (kind === PRIVATE_KEY) for (const [known, label] of this.labels) if (label.includes(PREVIEW_SEPARATOR) && value.includes(known)) this.labels.set(known, PRIVATE_KEY)
     } else if (kind === PRIVATE_KEY || (kind !== undefined && kind !== RANDOM_TOKEN && this.labels.get(value)!.startsWith(RANDOM_TOKEN))) {
       this.labels.set(value, describe(kind, value))
     }
@@ -60,12 +62,12 @@ export class Vault {
     return this.byPlaceholder.has(placeholder)
   }
 
-  // A name read from the text can hold a value the vault hid in another line, so it is checked when shown; a value shorter than a replayed one would match ordinary names.
+  // A name read from the text can hold a value the vault hid in another line, so it is checked when shown, whatever that value's length.
   private labelOf(value: string): string {
     const label = this.labels.get(value)!
     const name = label.split(PREVIEW_SEPARATOR)[0]!
     if (RULE_KINDS.has(name)) return label
-    for (const known of this.byValue.keys()) if (known.length >= MIN_REPLAYED_LENGTH && name.includes(known)) return 'secret'
+    for (const known of this.byValue.keys()) if (name.includes(known)) return 'secret'
     return label
   }
 

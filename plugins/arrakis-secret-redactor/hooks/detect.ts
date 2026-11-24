@@ -109,17 +109,13 @@ const CONCATENATED = /^\s+(?:\+|\.\.?|\|\|)\s|\s(?:\+|\.\.?|\|\|)\s+$/
 const SHELL_DEFAULT = /^(\$\{[A-Za-z_][A-Za-z0-9_]*:?([-=?+]))([^}]*)\}$/
 // After `:?` comes an error message, not a default.
 const SHELL_NOT_DEFAULT = /\$\{[A-Za-z_][A-Za-z0-9_]*:$/
-// A template fills the value in later: `"${{ secrets.X }}"`, `"{{ .Values.x }}"`, `"<%= ENV['X'] %>"`, `"#{ENV['X']}"`, `"${env:X}"`, `"$(cat /run/secrets/x)"`, `"${local.slug}/app"`. A command counts only when its arguments are paths, variables or flags.
-const TEMPLATE_PIECE = /\$\{\{[^}\n]*\}\}|\{\{[^}\n]*\}\}|<%[^%\n]*%>|\$\([\w.-]+(?:\s+(?:[\w.-]*\/[\w./-]*|\$\w+|-\w+))*\)|\$\{[A-Za-z_][\w.]*\}|#\{[^}\n]*\}|\$\{[a-z]+:[\w./-]+\}/g
+// A template fills the value in later, and each piece holds only a name or a path: `"${{ secrets.X }}"`, `"{{ .Values.x }}"`, `"${env:X}"`, `"${ssm:/app/x}"`, `"${local.slug}/app"`, `"$(cat /run/secrets/x)"`. A command counts only when its arguments are paths, variables or flags made of lowercase letters.
+const TEMPLATE_PIECE = /\$\{\{\s*(?:secrets|vars|env|inputs|matrix|needs|steps|github|jobs|runner)(?:\.[\w-]+)+\s*\}\}|\{\{\s*(?:\.[\w-]+)+\s*\}\}|\$\([\w.-]+(?:\s+(?:[\w.-]*\/[\w./-]*|\$\w+|--?[a-z][a-z-]*))*\)|\$\{[A-Za-z_][\w.]*\}|\$\{[a-z]+:[\w./-]+\}/g
 const SHELL_WITH_DEFAULT = /\$\{[A-Za-z_][A-Za-z0-9_]*:?[-=]/
-// Only a path that starts with `/` may follow the pieces, and a quoted text inside a piece names a variable, as in `ENV['DB_PASSWORD']`.
+// Only a path that starts with `/` may follow the pieces.
 const TEMPLATE_LEFTOVER = /^(?:\/[\w./:@-]*)?$/
-const QUOTED_IN_PIECE = /(["'])(.*?)\1/g
-const isTemplate = (value: string): boolean => {
-  const pieces = value.match(TEMPLATE_PIECE)
-  if (pieces === null || SHELL_WITH_DEFAULT.test(value) || !TEMPLATE_LEFTOVER.test(value.replace(TEMPLATE_PIECE, ''))) return false
-  return pieces.every(piece => [...piece.matchAll(QUOTED_IN_PIECE)].every(([, , inner]) => /^[A-Z_][A-Z0-9_]*$/.test(inner!)))
-}
+const isTemplate = (value: string): boolean =>
+  value.search(TEMPLATE_PIECE) !== -1 && !SHELL_WITH_DEFAULT.test(value) && TEMPLATE_LEFTOVER.test(value.replace(TEMPLATE_PIECE, ''))
 const URL_USER = new RegExp(String.raw`:\/\/${URL_USER_NAME}:`, 'gi')
 // The authority ends at "/", whitespace, a double quote or backtick, a single quote before `,` `}` `]` or `)`, or the next "://".
 const AUTHORITY_END = /[/\s"`]|'[,}\])]|:\/\//y

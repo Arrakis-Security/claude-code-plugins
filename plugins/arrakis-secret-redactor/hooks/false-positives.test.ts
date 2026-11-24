@@ -248,13 +248,11 @@ test('leaves a template and a shell message under a secret name readable', () =>
   const safe = [
     'password: "${{ secrets.DB_PASSWORD }}"',
     'password: "{{ .Values.db.password }}"',
-    `password: "<%= ENV['DB_PASSWORD'] %>"`,
     'PASSWORD="$(cat /run/secrets/pw)"',
     'secret_id = "${local.slug}/app/shared"',
     'TOKEN="${SLACK_INFRA_PROD_NOTIFICATIONS_TOKEN:-}"',
     'echo "${DB_PASSWORD:?DB_PASSWORD must be set}"',
     'PASSWORD="${DB_PASSWORD:?must be set}"',
-    `password: "#{ENV['DB_PASSWORD']}"`,
     'password: "${env:DB_PASSWORD}"',
     'password: "${ssm:/app/db-password}"',
   ]

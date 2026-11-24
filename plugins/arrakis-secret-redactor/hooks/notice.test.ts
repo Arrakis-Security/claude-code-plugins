@@ -173,6 +173,14 @@ test('shows no characters of a private key line seen alone after a service-accou
   expect(vault.mask(`found ${LONG}`).hidden).toEqual(new Set(['private key']))
 })
 
+test('shows no characters of a private key line seen before the whole key', () => {
+  const pem = ['-----BEGIN ', 'PRIVATE KEY-----\\n', LONG, '\\n', SHORT, LONG.slice(0, 10), '\\n-----END ', 'PRIVATE KEY-----\\n'].join('')
+  const vault = new Vault('t')
+  vault.mask(`found ${LONG}`)
+  vault.mask(`{"type": "service_account", "private_key": "${pem}"}`)
+  expect(vault.mask(`found ${LONG}`).hidden).toEqual(new Set(['private key']))
+})
+
 test('never names a secret by a name that is itself a secret, and keeps the hyphens in a name', () => {
   const token = ['gh', 'p_'].join('') + ['Zx9qL', 'm2Token', 'RkW4p', 'Yb7Nc', 'J3sHd'].join('')
   const remote = new Vault('t').mask(`origin\thttps://${token}:x-oauth-basic@github.com/acme/app.git (fetch)`)
@@ -213,8 +221,8 @@ test('names three hidden secrets and counts the rest', async ($, on) => {
   expect(toasts).toEqual(['Arrakis Secret Redactor: hid 4 secret(s) from Bash: DB_PASSWORD, APP_SECRET, API_TOKEN +1 more'])
 })
 
-test('names a secret by its name when only a short value in the vault is inside that name', () => {
+test('calls a name "secret" when it holds a value hidden earlier, however short', () => {
   const vault = new Vault('t')
   vault.mask('redis://u:key@h')
-  expect(vault.mask(`api_key=${['Zx9qL', 'm2Vt8', 'RkW4p', 'Yb7Nc'].join('')}`).hidden).toEqual(new Set([`api_key …Yb7Nc`.replace('Yb7Nc', 'b7Nc')]))
+  expect(vault.mask(`api_key=${['Zx9qL', 'm2Vt8', 'RkW4p', 'Yb7Nc'].join('')}`).hidden).toEqual(new Set(['secret']))
 })
