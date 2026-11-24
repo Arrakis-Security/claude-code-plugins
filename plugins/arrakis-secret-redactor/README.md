@@ -56,7 +56,7 @@ The line under the chat input counts what the plugin hid:
 ## What it detects
 
 - Token formats from known vendors: Anthropic, OpenAI, GitHub, Slack, Stripe, AWS access key IDs, 1Password service account tokens, and PEM (Privacy-Enhanced Mail format) private keys
-- A value under a name that points at a secret, such as `DB_PASSWORD=`, `"clientSecret":` or `api_key:`. An unquoted value runs to the next space, quote, `,`, `;` or `#`. A quoted value is hidden whole, spaces and escaped quotes included, in plain or escaped JSON, when its closing quote ends the line or comes before `,`, `;`, `)`, `}`, `]` or a `#` comment.
+- A value under a name that points at a secret, such as `DB_PASSWORD=`, `"clientSecret":` or `api_key:`. An unquoted value runs to the next space, quote, `,` or `;`, so it may hold a `#`. A `#` after a space starts a comment and stays visible. A quoted value is hidden whole, spaces and escaped quotes included, in plain or escaped JSON, when its closing quote ends the line or comes before `,`, `;`, `)`, `}`, `]` or a `#` comment.
 - The password in a URL such as `postgres://user:password@host`, up to the last `@` before the host, so a password may hold `@`, `#`, `?` or `'`
 - A `Bearer` token
 - A long random-looking string (one with high Shannon entropy, a measure of how random the characters are)
@@ -65,17 +65,17 @@ Git commit hashes, UUIDs (universally unique IDs), file paths, package integrity
 
 ## Limits
 
-- **Detection is pattern-based.** A secret in a format the rules don't know can get through, and a random-looking value that isn't a secret can be hidden.
 - **It covers tool results only.** A secret you type or paste into the prompt reaches Claude.
 - **A skill's text is not checked.** A skill can run a shell command while it loads, and that command's output reaches Claude as the skill returned it.
 - **Images and PDFs reach Claude unchanged.** The plugin checks text only, so a secret shown in a screenshot, written in a PDF or stored in the file's metadata reaches Claude.
 - **A quoted value counts whole only when a value's end follows its closing quote.** Otherwise the general rule applies, which hides it only up to its first space.
 - **Text under a secret-sounding name is hidden even when it is prose.** `"passwordHint": "Use at least 8 characters"` is hidden whole, and so is the same sentence in later results. A URL whose query holds an `@` has its host hidden too, and in a JSON line such as `{"url":"https://example.com","contact":"me@example.com"}`, the start of the email after the URL is hidden.
-- **A value shaped like a variable is left visible.** `"$DB_PASSWORD"`, `"${TOKEN}"` and an unquoted `$TOKEN` name where a secret lives, so a real password such as `"$uperman1"` or an unquoted `$uper2024!` is left visible too.
+- **A value shaped like a variable is left visible.** `"$DB_PASSWORD"`, `"${TOKEN}"` and an unquoted `$TOKEN` name where a secret lives, so a real password such as `"$uperman1"` or an unquoted `$uper2024!` is left visible too. So is a quoted template such as `"${{ secrets.DB_PASSWORD }}"` or `"{{ .Values.db.password }}"`, and an empty shell default such as `"${TOKEN:-}"`.
 - **A URL password is hidden again wherever it shows up later, even when it is short.** After `redis://u:2024@host`, a later `Copyright 2024` shows as a placeholder.
 - **The write check follows symbolic links, not hard links.** A git-ignored file that is a hard link to a tracked file counts as ignored.
 - **It hides values from Claude. Your programs can still read them.** A git-ignored file that Claude filled in can still be run or sent over the network.
 - **OpenTelemetry (a standard for tracing app activity) traces see tool output first.** When Claude Code exports OpenTelemetry traces, the `claude_code.tool` span can hold a tool's output as the tool returned it, before this plugin hides anything.
+- **Detection is pattern-based.** The plugin hides the shapes listed under "What it detects". The patterns may not cover every way to write a secret, so a secret in a shape they don't cover can reach Claude. A random-looking value that isn't a secret can be hidden.
 
 ## Where it runs
 

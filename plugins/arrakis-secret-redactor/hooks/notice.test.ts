@@ -1,0 +1,228 @@
+import { expect, test } from 'claude-code/testing'
+
+import { Vault } from './vault'
+
+// Built at run time, so no secret-shaped literal or placeholder sits in the file.
+const HASHED = ['abc', 'Def9', '#4R=-xYz#'].join('')
+const GITHUB = ['gh', 'p_'].join('') + ['Zx9qL', 'm2Vt8', 'RkW4p', 'Yb7Nc', 'J3sHd', 'Q6uFa'].join('')
+const FIRST = ['‹SECRET', 't', '1›'].join('_')
+
+test('hides an unquoted value whole when it holds a "#"', () => {
+  const out = new Vault('t').mask(`DB_PASSWORD=${HASHED}\nDB_PORT=5432`).text
+  expect(out).toBe(`DB_PASSWORD=${FIRST}\nDB_PORT=5432`)
+})
+
+test('still ends a value at a "#" comment after whitespace', () => {
+  expect(new Vault('t').mask(`DB_PASSWORD=${HASHED} # stage`).text).toBe(`DB_PASSWORD=${FIRST} # stage`)
+})
+
+test('names each hidden secret, showing only the last four characters of a long one', async ($, on) => {
+  const toasts: string[] = []
+  on('env.get', () => ({ value: undefined }))
+  on('ui.toast', (_$, e) => {
+    toasts.push(e.text)
+    return { value: undefined }
+  })
+  on('tool.call', () => ({ result: { stdout: `DB_PASSWORD=${HASHED}\nGH=${GITHUB}`, stderr: '', interrupted: false } }))
+
+  await $.tool.call({ tool: 'Bash', command: 'cat .env' } as never)
+
+  expect(toasts).toEqual([`Arrakis Secret Redactor: hid 2 secret(s) from Bash: DB_PASSWORD, GitHub token …${GITHUB.slice(-4)}`])
+  expect(toasts[0]).not.toContain(HASHED)
+})
+
+const LONG = ['Qw8zLp3XvN', '7rT2mK9bYc', '4hJdF6sA1u', 'E5gR0iO3nV'].join('')
+const SHORT = ['k3Vn', 'Q8wz', 'R2mx'].join('')
+
+test('leaves a "#" comment right after the "=" or ":" visible, in this result and later ones', () => {
+  const vault = new Vault('t')
+  for (const text of ['API_KEY= #required', '$primary_token: #1a2b3c4d;', '.btn { color: #1a2b3c4d; }']) {
+    expect(vault.mask(text)).toEqual({ text, count: 0, hidden: new Set() })
+  }
+})
+
+test('hides a value that starts with "#" right after the "=" or ":"', () => {
+  const password = ['#Xk29', 'abQ7'].join('')
+  expect(new Vault('t').mask(`DB_PASSWORD=${password}`).text).toBe(`DB_PASSWORD=${FIRST}`)
+})
+
+test('leaves Ruby and Elixir interpolation under a secret name visible', () => {
+  const vault = new Vault('t')
+  for (const text of ['password=#{ENV}', "api_token=#{ENV['API_TOKEN']}", 'puts "token=#{token}"']) {
+    expect(vault.mask(text)).toEqual({ text, count: 0, hidden: new Set() })
+  }
+})
+
+test('hides the part before a "#" again later only when it looks random, as for any value caught by its name', () => {
+  const random = ['abc', '12345'].join('')
+  const word = ['hun', 'ter'].join('')
+  for (const [prefix, laterCount] of [[random, 1], [word, 0]] as const) {
+    const vault = new Vault('t')
+    expect({ prefix, first: vault.mask(`DB_PASSWORD=${prefix}#prod`).text }).toEqual({ prefix, first: `DB_PASSWORD=${FIRST}` })
+    expect({ prefix, later: vault.mask(`echo ${prefix}`).count }).toEqual({ prefix, later: laterCount })
+  }
+})
+
+test('hides a quoted value that holds a "#" whole', () => {
+  const quoted = ['ab#cd', ' ef12'].join('')
+  expect(new Vault('t').mask(`DB_PASSWORD="${quoted}"`).text).toBe(`DB_PASSWORD="${FIRST}"`)
+})
+
+test('hides the part before a "#" again in later results, as dotenv reads it', () => {
+  const password = ['abc', '12345'].join('')
+  const vault = new Vault('t')
+  vault.mask(`DB_PASSWORD=${password}#prod`)
+  expect(vault.mask(`connected with ${password} ok`).count).toBe(1)
+})
+
+test('names a secret "secret" when its name holds a value hidden earlier', () => {
+  const short = ['Xk29', 'abQ7'].join('')
+  const vault = new Vault('t')
+  vault.mask(`DB_PASSWORD=${short}`)
+  expect(vault.mask(`${short}_TOKEN=whatever1`).hidden).toEqual(new Set(['secret', 'DB_PASSWORD']))
+})
+
+test('labels each kind of secret, and the private key wins where matches overlap', () => {
+  const pem = ['-----BEGIN ', 'PRIVATE KEY-----\\n', LONG, '\\n', LONG, '\\n-----END ', 'PRIVATE KEY-----\\n'].join('')
+  const bearer = ['Bearer ', LONG].join('')
+  const cases: [string, string[]][] = [
+    [`{"type": "service_account", "private_key": "${pem}"}`, ['private key']],
+    [`GITHUB_TOKEN=${GITHUB}`, [`GitHub token …${GITHUB.slice(-4)}`]],
+    [`postgres://app:${LONG}@db.example.com/app`, [`URL password …${LONG.slice(-4)}`]],
+    [`Authorization: ${bearer}`, [`Bearer token …${LONG.slice(-4)}`]],
+    [`{\\"client_secret\\": \\"${SHORT}\\"}`, ['client_secret']],
+  ]
+  for (const [text, labels] of cases) expect({ text, hidden: new Vault('t').mask(text).hidden }).toEqual({ text, hidden: new Set(labels) })
+})
+
+test('shows no characters of a key line that was seen alone before its private key', () => {
+  const pem = ['-----BEGIN ', 'PRIVATE KEY-----\n', LONG, '\n', SHORT, LONG.slice(0, 10), '\n-----END ', 'PRIVATE KEY-----'].join('')
+  const vault = new Vault('t')
+  expect(vault.mask(`found ${LONG}`).hidden).toEqual(new Set([`random-looking token …${LONG.slice(-4)}`]))
+  vault.mask(pem)
+  expect(vault.mask(`found ${LONG}`).hidden).toEqual(new Set(['private key']))
+  expect(vault.mask(`DB_PASSWORD=${LONG}`).hidden).toEqual(new Set(['private key']))
+})
+
+test('names a secret "secret" when its name holds a value hidden only in its own line', () => {
+  const word = ['hun', 'ter'].join('')
+  const vault = new Vault('t')
+  expect(vault.mask(`password: ${word}`).count).toBe(1)
+  expect(vault.mask(`${word}_TOKEN=whatever1`).hidden).toEqual(new Set(['secret']))
+})
+
+test('checks a name in the result against a value hidden in the context', async ($, on) => {
+  const password = ['hunter', '22'].join('')
+  const toasts: string[] = []
+  on('env.get', () => ({ value: undefined }))
+  on('ui.toast', (_$, e) => {
+    toasts.push(e.text)
+    return { value: undefined }
+  })
+  on('tool.call', () => ({ result: { stdout: `${password}_TOKEN=abcdefgh1`, stderr: '', interrupted: false }, context: [`password: ${password}`] }) as never)
+
+  await $.tool.call({ tool: 'Bash', command: 'cat .env' } as never)
+
+  expect(toasts).toEqual(['Arrakis Secret Redactor: hid 2 secret(s) from Bash: secret, password'])
+})
+
+test('checks a name against a value hidden in a later field of the same result', async ($, on) => {
+  const password = ['hunter', '22'].join('')
+  const toasts: string[] = []
+  on('env.get', () => ({ value: undefined }))
+  on('ui.toast', (_$, e) => {
+    toasts.push(e.text)
+    return { value: undefined }
+  })
+  on('tool.call', () => ({ result: { stdout: `${password}_TOKEN=abcdefgh1`, stderr: `password: ${password}`, interrupted: false } }))
+
+  await $.tool.call({ tool: 'Bash', command: 'cat .env' } as never)
+
+  expect(toasts).toEqual(['Arrakis Secret Redactor: hid 2 secret(s) from Bash: secret, password'])
+})
+
+test('checks a name against a value hidden later in the same text', () => {
+  const password = ['hunter', '22'].join('')
+  expect(new Vault('t').mask(`${password}_TOKEN=abcdefgh1\npassword: ${password}`).hidden).toEqual(new Set(['secret', 'password']))
+})
+
+test('names a replayed random token by the name it later shows under', () => {
+  const vault = new Vault('t')
+  vault.mask(`x ${LONG} y`)
+  vault.mask(`MY_TOKEN=${LONG}#zz`)
+  expect(vault.mask(`seen ${LONG}`).hidden).toEqual(new Set([`MY_TOKEN …${LONG.slice(-4)}`]))
+})
+
+test('keeps a label a rule gives, even when it holds a short value hidden earlier', () => {
+  const vault = new Vault('t')
+  vault.mask('postgres://u:pass@db.example.com/app')
+  expect(vault.mask(`postgres://app:${LONG}@db.example.com/app`).hidden).toEqual(new Set([`URL password …${LONG.slice(-4)}`]))
+})
+
+test('shows no characters of a private key line seen again on its own', () => {
+  const pem = ['-----BEGIN ', 'PRIVATE KEY-----\n', LONG, '\n', SHORT, LONG.slice(0, 10), '\n-----END ', 'PRIVATE KEY-----'].join('')
+  const vault = new Vault('t')
+  vault.mask(pem)
+  expect(vault.mask(`found ${LONG}`).hidden).toEqual(new Set(['private key']))
+})
+
+test('shows no characters of a private key line seen alone after a service-account JSON', () => {
+  const pem = ['-----BEGIN ', 'PRIVATE KEY-----\\n', LONG, '\\n', SHORT, LONG.slice(0, 10), '\\n-----END ', 'PRIVATE KEY-----\\n'].join('')
+  const vault = new Vault('t')
+  vault.mask(`{"type": "service_account", "private_key": "${pem}"}`)
+  expect(vault.mask(`found ${LONG}`).hidden).toEqual(new Set(['private key']))
+})
+
+test('shows no characters of a private key line seen before the whole key', () => {
+  const pem = ['-----BEGIN ', 'PRIVATE KEY-----\\n', LONG, '\\n', SHORT, LONG.slice(0, 10), '\\n-----END ', 'PRIVATE KEY-----\\n'].join('')
+  const vault = new Vault('t')
+  vault.mask(`found ${LONG}`)
+  vault.mask(`{"type": "service_account", "private_key": "${pem}"}`)
+  expect(vault.mask(`found ${LONG}`).hidden).toEqual(new Set(['private key']))
+})
+
+test('never names a secret by a name that is itself a secret, and keeps the hyphens in a name', () => {
+  const token = ['gh', 'p_'].join('') + ['Zx9qL', 'm2Token', 'RkW4p', 'Yb7Nc', 'J3sHd'].join('')
+  const remote = new Vault('t').mask(`origin\thttps://${token}:x-oauth-basic@github.com/acme/app.git (fetch)`)
+  expect(remote.text).not.toContain(token)
+  expect([...remote.hidden].join()).not.toContain(token.slice(4, 12))
+  expect(new Vault('t').mask(`X-Api-Key: ${SHORT}`).hidden).toEqual(new Set(['Api-Key']))
+})
+
+test('names a value by its name once a later result shows it under one', () => {
+  const vault = new Vault('t')
+  expect(vault.mask(LONG).hidden).toEqual(new Set([`random-looking token …${LONG.slice(-4)}`]))
+  expect(vault.mask(`DB_PASSWORD=${LONG}`).hidden).toEqual(new Set([`DB_PASSWORD …${LONG.slice(-4)}`]))
+})
+
+test('names a value hidden again by replay as it was first named', () => {
+  const vault = new Vault('t')
+  vault.mask(`REDIS_PASSWORD=${SHORT}`)
+  expect(vault.mask(`echo ${SHORT}`).hidden).toEqual(new Set(['REDIS_PASSWORD']))
+})
+
+test('shows no characters of a private key', () => {
+  const pem = ['-----BEGIN ', 'PRIVATE KEY-----\n', LONG, LONG, '\n-----END ', 'PRIVATE KEY-----'].join('')
+  expect(new Vault('t').mask(pem).hidden).toEqual(new Set(['private key']))
+})
+
+test('names three hidden secrets and counts the rest', async ($, on) => {
+  const toasts: string[] = []
+  on('env.get', () => ({ value: undefined }))
+  on('ui.toast', (_$, e) => {
+    toasts.push(e.text)
+    return { value: undefined }
+  })
+  const stdout = ['DB_PASSWORD', 'APP_SECRET', 'API_TOKEN', 'SMTP_PASSWD'].map((name, i) => `${name}=${SHORT}${i}`).join('\n')
+  on('tool.call', () => ({ result: { stdout, stderr: '', interrupted: false } }))
+
+  await $.tool.call({ tool: 'Bash', command: 'cat .env' } as never)
+
+  expect(toasts).toEqual(['Arrakis Secret Redactor: hid 4 secret(s) from Bash: DB_PASSWORD, APP_SECRET, API_TOKEN +1 more'])
+})
+
+test('calls a name "secret" when it holds a value hidden earlier, however short', () => {
+  const vault = new Vault('t')
+  vault.mask('redis://u:key@h')
+  expect(vault.mask(`api_key=${['Zx9qL', 'm2Vt8', 'RkW4p', 'Yb7Nc'].join('')}`).hidden).toEqual(new Set(['secret']))
+})

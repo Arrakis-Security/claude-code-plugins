@@ -59,7 +59,7 @@ test('keeps hiding a value it has seen even where no rule matches it', () => {
 
 test('masks nested results and refuses shapes it cannot rebuild', () => {
   const vault = new Vault('t')
-  const tally = { count: 0 }
+  const tally = { count: 0, found: new Set<string>() }
   expect(maskDeep({ stdout: `DB_PASSWORD=hunter22x`, code: 0, lines: ['ok'] }, vault, tally)).toEqual({
     stdout: 'DB_PASSWORD=‹SECRET_t_1›',
     code: 0,
@@ -70,7 +70,7 @@ test('masks nested results and refuses shapes it cannot rebuild', () => {
 })
 
 test('masks a secret that sits in an object key', () => {
-  const tally = { count: 0 }
+  const tally = { count: 0, found: new Set<string>() }
   const result = maskDeep({ [`key=${RANDOM}`]: true }, new Vault('t'), tally)
   expect(JSON.stringify(result)).not.toContain(RANDOM)
   expect(tally.count).toBe(1)
